@@ -470,7 +470,7 @@ fun AuthScreen(
                     }
 
                     val clientId = authService?.getGoogleWebClientId()?.takeIf { it.isNotBlank() }
-                        ?: "619659849137-webclient.apps.googleusercontent.com"
+                        ?: "906231122938-klas99rgihsi8vtl3h13c89kggamudos.apps.googleusercontent.com"
 
                     coroutineScope.launch {
                         try {
