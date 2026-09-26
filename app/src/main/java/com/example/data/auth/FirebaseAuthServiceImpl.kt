@@ -866,6 +866,16 @@ class FirebaseAuthServiceImpl(
     override fun getGoogleWebClientId(): String? {
         val fromEnv = System.getenv("GOOGLE_WEB_CLIENT_ID")
         if (!fromEnv.isNullOrBlank()) return fromEnv
+
+        // Check auto-generated resource string from google-services.json if present
+        try {
+            val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+            if (resId != 0) {
+                val resVal = context.getString(resId)
+                if (resVal.isNotBlank()) return resVal
+            }
+        } catch (_: Exception) {}
+
         return prefs.getString("google_web_client_id", null)
     }
 
