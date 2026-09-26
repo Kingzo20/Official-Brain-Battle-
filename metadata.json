@@ -1,0 +1,6 @@
+{
+  "name": "Brain Battle",
+  "description": "Think Fast. Play Smart. Beat Your Best. A brain-training and competitive puzzle game.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

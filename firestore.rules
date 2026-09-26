@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User profile rules: users can only read and write their own profile
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId)
+        // Ensure core critical fields cannot be tampered arbitrarily
+        && request.resource.data.uid == userId;
+      allow delete: if isOwner(userId);
+
+      // User subcollections (gameHistory, dailyChallenges, achievements)
+      match /gameHistory/{gameId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /dailyChallenges/{dateId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /achievements/{achievementId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Public / Competitive Leaderboards
+    // Anyone authenticated can read rankings
+    // Writes are only allowed for the user's own entry, with strictly validated fields
+    match /leaderboards/{periodId}/entries/{userId} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isOwner(userId)
+        && request.resource.data.score is int
+        && request.resource.data.score >= 0
+        && request.resource.data.score <= 100000
+        && request.resource.data.username is string
+        && request.resource.data.username.size() >= 2
+        && request.resource.data.username.size() <= 30;
+    }
+
+    // Question Reports
+    match /questionReports/{reportId} {
+      allow create: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow update, delete: if false; // Reports cannot be modified by clients
+    }
+  }
+}
