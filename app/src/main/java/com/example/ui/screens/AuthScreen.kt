@@ -68,14 +68,6 @@ fun AuthScreen(
     var isCheckingVerification by remember { mutableStateOf(false) }
     var verificationStatusMessage by remember { mutableStateOf<String?>(null) }
 
-    // Google Sign-In state
-    var showGoogleAccountPicker by remember { mutableStateOf(false) }
-    var isAddingCustomGoogleAccount by remember { mutableStateOf(false) }
-    var customGoogleEmail by remember { mutableStateOf("") }
-    var customGoogleDisplayName by remember { mutableStateOf("") }
-    var customGoogleError by remember { mutableStateOf<String?>(null) }
-    var showGoogleSetupDialog by remember { mutableStateOf(false) }
-
     // Password reset state
     var forgotPasswordOpen by remember { mutableStateOf(false) }
     var resetEmail by remember { mutableStateOf("") }
@@ -254,6 +246,7 @@ fun AuthScreen(
                             errorMessage = null
                         },
                         label = { Text("Email Address", color = TextSecondary) },
+                        placeholder = { Text("name@example.com", color = TextMuted) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         leadingIcon = {
@@ -282,6 +275,7 @@ fun AuthScreen(
                             errorMessage = null
                         },
                         label = { Text("Password", color = TextSecondary) },
+                        placeholder = { Text("••••••••", color = TextMuted) },
                         singleLine = true,
                         visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -320,6 +314,7 @@ fun AuthScreen(
                                 errorMessage = null
                             },
                             label = { Text("Confirm Password", color = TextSecondary) },
+                            placeholder = { Text("••••••••", color = TextMuted) },
                             singleLine = true,
                             visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -359,48 +354,6 @@ fun AuthScreen(
                                     .padding(4.dp)
                                     .testTag("auth_forgot_password_link")
                             )
-                        }
-
-                        // Demo Account Quick Fill Button
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Surface(
-                            onClick = {
-                                email = "kingzotalker@gmail.com"
-                                password = "kingzley@1A"
-                                errorMessage = null
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            color = NeonCyan.copy(alpha = 0.08f),
-                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.35f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("auth_demo_account_button")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "⚡ Demo Account (Pioneer)",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = NeonCyan,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "kingzotalker@gmail.com",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = TextSecondary
-                                    )
-                                }
-                                Text(
-                                    text = "Auto-Fill ➔",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = NeonCyan,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
                         }
                     }
                 }
@@ -510,63 +463,64 @@ fun AuthScreen(
             OutlinedButton(
                 onClick = {
                     errorMessage = null
-                    val clientId = authService?.getGoogleWebClientId()
-                    if (clientId.isNullOrBlank() || authService?.isFirebaseConfigured != true) {
-                        // PREVIEW / SANDBOX MODE (Google AI Studio Environment):
-                        // Trigger interactive mock Google Account Picker dialog
-                        showGoogleAccountPicker = true
-                    } else {
-                        // PRODUCTION / NATIVE ANDROID MODE (Firebase Credentials Manager API)
-                        coroutineScope.launch {
-                            try {
-                                isLoading = true
-                                val credentialManager = CredentialManager.create(context)
-                                val googleIdOption = GetGoogleIdOption.Builder()
-                                    .setFilterByAuthorizedAccounts(false)
-                                    .setServerClientId(clientId)
-                                    .setAutoSelectEnabled(false)
-                                    .build()
+                    val activity = context as? Activity
+                    if (activity == null) {
+                        errorMessage = "Activity context is required for Google Sign-In"
+                        return@OutlinedButton
+                    }
 
-                                val request = GetCredentialRequest.Builder()
-                                    .addCredentialOption(googleIdOption)
-                                    .build()
+                    val clientId = authService?.getGoogleWebClientId()?.takeIf { it.isNotBlank() }
+                        ?: "619659849137-webclient.apps.googleusercontent.com"
 
-                                val activity = context as? Activity
-                                if (activity == null) {
-                                    isLoading = false
-                                    errorMessage = "Activity context is required for Google Sign-In"
-                                    return@launch
-                                }
+                    coroutineScope.launch {
+                        try {
+                            isLoading = true
+                            val credentialManager = CredentialManager.create(context)
+                            val googleIdOption = GetGoogleIdOption.Builder()
+                                .setFilterByAuthorizedAccounts(false)
+                                .setServerClientId(clientId)
+                                .setAutoSelectEnabled(false)
+                                .build()
 
-                                val result = credentialManager.getCredential(activity, request)
-                                val credential = result.credential
-                                if (credential is androidx.credentials.CustomCredential &&
-                                    credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-                                ) {
-                                    val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                                    val idToken = googleIdTokenCredential.idToken
+                            val request = GetCredentialRequest.Builder()
+                                .addCredentialOption(googleIdOption)
+                                .build()
 
-                                    val authResult = authService.signInWithGoogle(idToken)
-                                    isLoading = false
-                                    when (authResult) {
-                                        is AuthResult.Success -> {
-                                            onAuthSuccess(authResult.data.username)
-                                        }
-                                        is AuthResult.Error -> {
-                                            errorMessage = authResult.message
-                                        }
+                            val result = credentialManager.getCredential(activity, request)
+                            val credential = result.credential
+                            if (credential is androidx.credentials.CustomCredential &&
+                                credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                            ) {
+                                val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                                val idToken = googleIdTokenCredential.idToken
+
+                                val authResult = authService?.signInWithGoogle(idToken)
+                                isLoading = false
+                                when (authResult) {
+                                    is AuthResult.Success -> {
+                                        onAuthSuccess(authResult.data.username)
                                     }
-                                } else {
-                                    isLoading = false
-                                    errorMessage = "Unexpected credential returned from Google Sign-In"
+                                    is AuthResult.Error -> {
+                                        errorMessage = authResult.message
+                                    }
+                                    null -> {
+                                        errorMessage = "Authentication service unavailable"
+                                    }
                                 }
-                            } catch (e: GetCredentialCancellationException) {
+                            } else {
                                 isLoading = false
-                                // User cancelled, no error needed
-                            } catch (e: Exception) {
-                                isLoading = false
-                                // Fall back to interactive account picker for preview/emulator compatibility
-                                showGoogleAccountPicker = true
+                                errorMessage = "Unexpected credential returned from Google Sign-In"
+                            }
+                        } catch (e: GetCredentialCancellationException) {
+                            isLoading = false
+                            // User dismissed native Google account picker; no error display
+                        } catch (e: Exception) {
+                            isLoading = false
+                            val msg = e.localizedMessage ?: "Google Sign-In failed"
+                            errorMessage = when {
+                                msg.contains("16") || msg.contains("12500") || msg.contains("Cannot find a matching credential") ->
+                                    "Google Play Services: Unable to sign in with Google on this device. Please check Google Account settings."
+                                else -> msg
                             }
                         }
                     }
@@ -746,503 +700,7 @@ fun AuthScreen(
         )
     }
 
-    // Interactive Mock Google Account Picker Dialog (Dual-Mode: Preview / Sandbox Mode)
-    if (showGoogleAccountPicker) {
-        val registeredGoogleUsers = remember(showGoogleAccountPicker, authService) {
-            authService?.getRegisteredGoogleAccounts() ?: emptyList()
-        }
 
-        AlertDialog(
-            onDismissRequest = {
-                showGoogleAccountPicker = false
-                isAddingCustomGoogleAccount = false
-                customGoogleError = null
-            },
-            title = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color.White,
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "G",
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFF4285F4)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "Choose an account",
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                    Text(
-                        text = "to continue to Brain Battle",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp)
-                ) {
-                    if (isAddingCustomGoogleAccount) {
-                        Text(
-                            text = "Add another Google Account",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = NeonCyan,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        if (customGoogleError != null) {
-                            Text(
-                                text = customGoogleError ?: "",
-                                color = NeonRed,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
-
-                        OutlinedTextField(
-                            value = customGoogleEmail,
-                            onValueChange = {
-                                customGoogleEmail = it
-                                customGoogleError = null
-                            },
-                            label = { Text("Google Email Address", color = TextSecondary) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                            leadingIcon = {
-                                Icon(Icons.Default.Email, contentDescription = "Email", tint = NeonCyan)
-                            },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = CardSurfaceBorder,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("custom_google_email_input")
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        OutlinedTextField(
-                            value = customGoogleDisplayName,
-                            onValueChange = {
-                                customGoogleDisplayName = it
-                                customGoogleError = null
-                            },
-                            label = { Text("Display Name", color = TextSecondary) },
-                            singleLine = true,
-                            leadingIcon = {
-                                Icon(Icons.Default.Person, contentDescription = "Name", tint = NeonCyan)
-                            },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = CardSurfaceBorder,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("custom_google_name_input")
-                        )
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    isAddingCustomGoogleAccount = false
-                                    customGoogleError = null
-                                }
-                            ) {
-                                Text("Back", color = TextSecondary)
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = {
-                                    val trimmedEmail = customGoogleEmail.trim().lowercase()
-                                    if (trimmedEmail.isBlank() || !trimmedEmail.contains("@")) {
-                                        customGoogleError = "Please enter a valid Google email address"
-                                        return@Button
-                                    }
-                                    val name = customGoogleDisplayName.trim().ifBlank {
-                                        trimmedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
-                                    }
-                                    showGoogleAccountPicker = false
-                                    isAddingCustomGoogleAccount = false
-                                    isLoading = true
-                                    coroutineScope.launch {
-                                        val result = authService?.signInOrSignUpWithGoogleAccount(
-                                            email = trimmedEmail,
-                                            displayName = name
-                                        )
-                                        isLoading = false
-                                        when (result) {
-                                            is AuthResult.Success -> {
-                                                onAuthSuccess(result.data.username)
-                                            }
-                                            is AuthResult.Error -> {
-                                                errorMessage = result.message
-                                            }
-                                            null -> {
-                                                onAuthSuccess(name)
-                                            }
-                                        }
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.testTag("custom_google_submit_button")
-                            ) {
-                                Text("CONTINUE", color = BackgroundDark, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    } else {
-                        // 1. Account: kingzotalker@gmail.com (Kingsley - Default Google Account)
-                        Surface(
-                            onClick = {
-                                showGoogleAccountPicker = false
-                                isLoading = true
-                                coroutineScope.launch {
-                                    val result = authService?.signInOrSignUpWithGoogleAccount(
-                                        email = "kingzotalker@gmail.com",
-                                        displayName = "Kingsley"
-                                    )
-                                    isLoading = false
-                                    when (result) {
-                                        is AuthResult.Success -> {
-                                            onAuthSuccess(result.data.username)
-                                        }
-                                        is AuthResult.Error -> {
-                                            errorMessage = result.message
-                                        }
-                                        null -> {
-                                            errorMessage = "Auth service not available"
-                                        }
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = CardSurfaceBorder.copy(alpha = 0.35f),
-                            border = BorderStroke(1.dp, CardSurfaceBorder),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("google_account_item_default")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = Color(0xFF673AB7),
-                                    modifier = Modifier.size(38.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(text = "K", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = "kingzotalker@gmail.com",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
-                                    )
-                                    Text(
-                                        text = "Kingsley (Default Google Account)",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextSecondary
-                                    )
-                                }
-                            }
-                        }
-
-                        // 2. Previously registered Google accounts on this device
-                        registeredGoogleUsers.filter { it.email != "kingzotalker@gmail.com" }.forEach { googleUser ->
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Surface(
-                                onClick = {
-                                    showGoogleAccountPicker = false
-                                    isLoading = true
-                                    coroutineScope.launch {
-                                        val result = authService?.signInOrSignUpWithGoogleAccount(
-                                            email = googleUser.email,
-                                            displayName = googleUser.displayName,
-                                            photoUrl = googleUser.photoUrl
-                                        )
-                                        isLoading = false
-                                        when (result) {
-                                            is AuthResult.Success -> {
-                                                onAuthSuccess(result.data.username)
-                                            }
-                                            is AuthResult.Error -> {
-                                                errorMessage = result.message
-                                            }
-                                            null -> {
-                                                onAuthSuccess(googleUser.username)
-                                            }
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = CardSurfaceBorder.copy(alpha = 0.35f),
-                                border = BorderStroke(1.dp, CardSurfaceBorder),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("google_account_item_${googleUser.email}")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = NeonCyan.copy(alpha = 0.2f),
-                                        border = BorderStroke(1.dp, NeonCyan),
-                                        modifier = Modifier.size(38.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = googleUser.displayName.take(1).uppercase(),
-                                                color = NeonCyan,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 18.sp
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(
-                                            text = googleUser.email,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = TextPrimary
-                                        )
-                                        Text(
-                                            text = "${googleUser.displayName} (Existing Google User)",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = NeonGreen
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // 3. Quick test option: "kingsley.gamer@gmail.com (Kingsley Gamer - New User)"
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            onClick = {
-                                showGoogleAccountPicker = false
-                                isLoading = true
-                                coroutineScope.launch {
-                                    val result = authService?.signInOrSignUpWithGoogleAccount(
-                                        email = "kingsley.gamer@gmail.com",
-                                        displayName = "Kingsley Gamer",
-                                        photoUrl = "https://lh3.googleusercontent.com/a/kingsley-avatar"
-                                    )
-                                    isLoading = false
-                                    when (result) {
-                                        is AuthResult.Success -> {
-                                            onAuthSuccess(result.data.username)
-                                        }
-                                        is AuthResult.Error -> {
-                                            errorMessage = result.message
-                                        }
-                                        null -> {
-                                            onAuthSuccess("Kingsley_Gamer")
-                                        }
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = CardSurfaceBorder.copy(alpha = 0.2f),
-                            border = BorderStroke(1.dp, CardSurfaceBorder.copy(alpha = 0.6f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("google_account_item_sample_new")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = NeonAmber.copy(alpha = 0.2f),
-                                    border = BorderStroke(1.dp, NeonAmber),
-                                    modifier = Modifier.size(38.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = "G",
-                                            color = NeonAmber,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 18.sp
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = "kingsley.gamer@gmail.com",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
-                                    )
-                                    Text(
-                                        text = "Kingsley Gamer (New Google Account)",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextSecondary
-                                    )
-                                }
-                            }
-                        }
-
-                        // 4. "+ Add another Google Account"
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Surface(
-                            onClick = {
-                                isAddingCustomGoogleAccount = true
-                                customGoogleEmail = ""
-                                customGoogleDisplayName = ""
-                                customGoogleError = null
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color.Transparent,
-                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.45f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("google_add_another_account_button")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = NeonCyan.copy(alpha = 0.15f),
-                                    modifier = Modifier.size(38.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.Add,
-                                            contentDescription = "Add Google Account",
-                                            tint = NeonCyan,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = "+ Add another Google Account",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = NeonCyan
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Text(
-                            text = "To continue, Google will share your name, email address, and profile picture with Brain Battle.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary.copy(alpha = 0.8f),
-                            lineHeight = 14.sp
-                        )
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showGoogleAccountPicker = false
-                        isAddingCustomGoogleAccount = false
-                    },
-                    modifier = Modifier.testTag("google_account_picker_cancel")
-                ) {
-                    Text("Cancel", color = TextSecondary)
-                }
-            },
-            containerColor = CardSurface,
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.testTag("google_account_picker_dialog")
-        )
-    }
-
-    // Google Sign-In Setup Guide Dialog (When Web Client ID or google-services is not yet provisioned)
-    if (showGoogleSetupDialog) {
-        AlertDialog(
-            onDismissRequest = { showGoogleSetupDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "ℹ️", fontSize = 24.sp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Google Sign-In Configuration", fontWeight = FontWeight.Bold, color = TextPrimary)
-                }
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "To enable Google Sign-In with real authentication:",
-                        color = TextPrimary,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "1. Enable Google Sign-In in Firebase Console -> Authentication -> Sign-in providers.\n" +
-                                "2. Provide GOOGLE_WEB_CLIENT_ID in the AI Studio Secrets panel.\n" +
-                                "3. Make sure google-services.json includes the SHA-1 signing fingerprint of the app.",
-                        color = TextSecondary,
-                        style = MaterialTheme.typography.bodySmall,
-                        lineHeight = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "In the meantime, you can register and sign in seamlessly with your email address.",
-                        color = NeonCyan,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { showGoogleSetupDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.testTag("google_setup_dialog_dismiss")
-                ) {
-                    Text("GOT IT", color = BackgroundDark, fontWeight = FontWeight.Bold)
-                }
-            },
-            containerColor = CardSurface,
-            shape = RoundedCornerShape(20.dp)
-        )
-    }
 
     // Password Reset Dialog
     if (forgotPasswordOpen) {
