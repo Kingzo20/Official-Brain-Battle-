@@ -112,7 +112,24 @@ class PersistentUserAccountStore(private val context: Context) {
 
     init {
         loadAllFromDisk()
-        seedDefaultAccounts()
+    }
+
+    /**
+     * Wipes all local SQLite accounts, cached file backups, and SharedPreferences.
+     */
+    @Synchronized
+    fun clearAllAccounts() {
+        try {
+            emailCache.clear()
+            uidCache.clear()
+            val db = dbHelper.writableDatabase
+            db.delete("users", null, null)
+            if (backupFile.exists()) backupFile.delete()
+            prefs.edit().clear().commit()
+            Log.i(tag, "All local mock/cached user accounts wiped clean.")
+        } catch (e: Exception) {
+            Log.e(tag, "Error clearing local accounts", e)
+        }
     }
 
     companion object {

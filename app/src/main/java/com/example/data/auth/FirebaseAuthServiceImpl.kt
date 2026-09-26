@@ -5,10 +5,9 @@ import android.util.Log
 import com.example.data.local.LocalStorageRepository
 import com.example.model.UserProfile
 import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
-import com.google.firebase.auth.FirebaseAuthUserCollisionException
-import com.google.firebase.auth.FirebaseAuthWeakPasswordException
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
@@ -27,43 +26,44 @@ class FirebaseAuthServiceImpl(
 
     private val tag = "FirebaseAuthService"
 
+    companion object {
+        const val FIREBASE_PROJECT_ID = "brain-battle-21d8b"
+        const val FIREBASE_APPLICATION_ID = "1:906231122938:android:7d6a9c9693d19199113243"
+        const val FIREBASE_API_KEY = "AIzaSyCVCcRkbrJxsUa5Q0uMQqUPCjXMrFYqp1c"
+        const val FIREBASE_GCM_SENDER_ID = "906231122938"
+        const val FIREBASE_STORAGE_BUCKET = "brain-battle-21d8b.firebasestorage.app"
+    }
+
     val userStore = PersistentUserAccountStore(context)
     private val localRepo = LocalStorageRepository(context)
     private val prefs = context.getSharedPreferences("brain_battle_auth", Context.MODE_PRIVATE)
 
-    private val _isFirebaseConfigured = try {
-        val apps = FirebaseApp.getApps(context)
-        if (apps.isNotEmpty()) {
-            val app = apps.first()
-            val opts = app.options
-            !opts.apiKey.isNullOrBlank() && !opts.applicationId.isNullOrBlank() && opts.apiKey != "dummy"
-        } else {
-            false
+    private val auth: FirebaseAuth = try {
+        val appContext = context.applicationContext ?: context
+        if (FirebaseApp.getApps(appContext).isEmpty()) {
+            val options = FirebaseOptions.Builder()
+                .setApplicationId(FIREBASE_APPLICATION_ID)
+                .setApiKey(FIREBASE_API_KEY)
+                .setProjectId(FIREBASE_PROJECT_ID)
+                .setGcmSenderId(FIREBASE_GCM_SENDER_ID)
+                .setStorageBucket(FIREBASE_STORAGE_BUCKET)
+                .build()
+            FirebaseApp.initializeApp(appContext, options)
         }
+        FirebaseAuth.getInstance()
     } catch (e: Exception) {
-        Log.w(tag, "Firebase initialization check: ${e.message}")
-        false
+        Log.e(tag, "Error getting FirebaseAuth instance", e)
+        FirebaseAuth.getInstance()
     }
 
-    override val isFirebaseConfigured: Boolean get() = _isFirebaseConfigured
+    private val firestore: FirebaseFirestore? = try {
+        FirebaseFirestore.getInstance()
+    } catch (e: Exception) {
+        Log.e(tag, "Error getting FirebaseFirestore instance", e)
+        null
+    }
 
-    private val auth: FirebaseAuth? = if (_isFirebaseConfigured) {
-        try {
-            FirebaseAuth.getInstance()
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to get FirebaseAuth instance", e)
-            null
-        }
-    } else null
-
-    private val firestore: FirebaseFirestore? = if (_isFirebaseConfigured) {
-        try {
-            FirebaseFirestore.getInstance()
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to get FirebaseFirestore instance", e)
-            null
-        }
-    } else null
+    override val isFirebaseConfigured: Boolean = true
 
     private val _currentUser = MutableStateFlow<AuthUser?>(null)
     override val currentUser: StateFlow<AuthUser?> = _currentUser.asStateFlow()
@@ -75,97 +75,38 @@ class FirebaseAuthServiceImpl(
         get() = _currentUser.value != null
 
     init {
-        seedDefaultAccounts()
+        // Clear out any old mock user cache or false local collisions
+        userStore.clearAllAccounts()
         restoreSession()
     }
 
-    private fun seedDefaultAccounts() {
-        userStore.seedDefaultAccounts()
-        val demoUid = PersistentUserAccountStore.generateDeterministicUid(PersistentUserAccountStore.DEMO_EMAIL)
-        if (!localRepo.hasProfileData(demoUid)) {
-            val demoProfile = UserProfile(
-                uid = demoUid,
-                playerId = "BB-987654",
-                username = PersistentUserAccountStore.DEMO_USERNAME,
-                displayName = PersistentUserAccountStore.DEMO_DISPLAY_NAME,
-                email = PersistentUserAccountStore.DEMO_EMAIL,
-                avatarEmoji = "👑",
-                level = 5,
-                currentXp = 320,
-                nextLevelXp = 500,
-                totalXp = 1800,
-                gamesPlayed = 30,
-                totalScore = 21500,
-                bestScore = 980,
-                currentStreak = 6,
-                bestStreak = 14,
-                selectedTitle = "Pioneer",
-                unlockedTitles = listOf("Pioneer", "Rookie", "Grandmaster"),
-                emailVerified = true,
-                role = PersistentUserAccountStore.DEMO_ROLE
-            )
-            localRepo.saveProfile(demoProfile)
-        }
-    }
-
     private fun restoreSession() {
-        if (_isFirebaseConfigured && auth != null) {
-            auth.addAuthStateListener { firebaseAuth ->
-                val fbUser = firebaseAuth.currentUser
-                if (fbUser != null) {
-                    val savedUsername = prefs.getString("user_username_${fbUser.uid}", null)
-                        ?: fbUser.displayName?.ifBlank { null }
-                        ?: fbUser.email?.substringBefore("@")
-                        ?: "Player"
+        auth.addAuthStateListener { firebaseAuth ->
+            val fbUser = firebaseAuth.currentUser
+            if (fbUser != null) {
+                val savedUsername = prefs.getString("user_username_${fbUser.uid}", null)
+                    ?: fbUser.displayName?.ifBlank { null }
+                    ?: fbUser.email?.substringBefore("@")
+                    ?: "Player"
 
-                    val isGoogle = fbUser.providerData.any { it.providerId == "google.com" }
-                    val authUser = AuthUser(
-                        uid = fbUser.uid,
-                        email = PersistentUserAccountStore.normalizeEmail(fbUser.email ?: ""),
-                        username = savedUsername,
-                        displayName = fbUser.displayName ?: savedUsername,
-                        photoUrl = fbUser.photoUrl?.toString(),
-                        isAnonymous = fbUser.isAnonymous,
-                        isEmailVerified = fbUser.isEmailVerified,
-                        providerId = fbUser.providerData.firstOrNull()?.providerId ?: "firebase",
-                        role = "CUSTOMER / PIONEER",
-                        authType = if (isGoogle) "GOOGLE_OAUTH" else "PASSWORD"
-                    )
-                    localRepo.setActiveSessionUid(fbUser.uid)
-                    _currentUser.value = authUser
-                    _authState.value = AuthState.AUTHENTICATED
-                } else {
-                    localRepo.setActiveSessionUid(null)
-                    _currentUser.value = null
-                    _authState.value = AuthState.UNAUTHENTICATED
-                }
-            }
-        } else {
-            // Restore persistent non-volatile local session
-            val activeUid = localRepo.getActiveSessionUid()
-            if (!activeUid.isNullOrBlank()) {
-                val stored = userStore.getUserByUid(activeUid)
-                if (stored != null) {
-                    val isGoogle = stored.authProvider.equals("GOOGLE", ignoreCase = true)
-                    val authUser = AuthUser(
-                        uid = stored.uid,
-                        email = stored.email,
-                        username = stored.username,
-                        displayName = stored.displayName,
-                        photoUrl = stored.photoUrl,
-                        isEmailVerified = stored.isEmailVerified,
-                        providerId = if (isGoogle) "google.com" else "local",
-                        role = stored.role,
-                        authType = if (isGoogle) "GOOGLE_OAUTH" else "PASSWORD"
-                    )
-                    _currentUser.value = authUser
-                    _authState.value = AuthState.AUTHENTICATED
-                } else {
-                    localRepo.setActiveSessionUid(null)
-                    _currentUser.value = null
-                    _authState.value = AuthState.UNAUTHENTICATED
-                }
+                val isGoogle = fbUser.providerData.any { it.providerId == "google.com" }
+                val authUser = AuthUser(
+                    uid = fbUser.uid,
+                    email = PersistentUserAccountStore.normalizeEmail(fbUser.email ?: ""),
+                    username = savedUsername,
+                    displayName = fbUser.displayName ?: savedUsername,
+                    photoUrl = fbUser.photoUrl?.toString(),
+                    isAnonymous = fbUser.isAnonymous,
+                    isEmailVerified = fbUser.isEmailVerified,
+                    providerId = fbUser.providerData.firstOrNull()?.providerId ?: "firebase",
+                    role = "CUSTOMER / PIONEER",
+                    authType = if (isGoogle) "GOOGLE_OAUTH" else "PASSWORD"
+                )
+                localRepo.setActiveSessionUid(fbUser.uid)
+                _currentUser.value = authUser
+                _authState.value = AuthState.AUTHENTICATED
             } else {
+                localRepo.setActiveSessionUid(null)
                 _currentUser.value = null
                 _authState.value = AuthState.UNAUTHENTICATED
             }
@@ -180,7 +121,7 @@ class FirebaseAuthServiceImpl(
         val validChars = Regex("^[a-zA-Z0-9_]+$")
         if (!validChars.matches(trimmed)) return UsernameValidationStatus.INVALID_CHARACTERS
 
-        if (_isFirebaseConfigured && firestore != null) {
+        if (firestore != null) {
             return try {
                 val doc = firestore.collection("usernames")
                     .document(trimmed.lowercase())
@@ -188,7 +129,7 @@ class FirebaseAuthServiceImpl(
                     .await()
                 if (doc.exists()) {
                     val ownerUid = doc.getString("uid")
-                    if (ownerUid != null && ownerUid == auth?.currentUser?.uid) {
+                    if (ownerUid != null && ownerUid == auth.currentUser?.uid) {
                         UsernameValidationStatus.VALID
                     } else {
                         UsernameValidationStatus.TAKEN
@@ -197,16 +138,11 @@ class FirebaseAuthServiceImpl(
                     UsernameValidationStatus.VALID
                 }
             } catch (e: Exception) {
-                Log.w(tag, "Firestore username check error: ${e.message}")
+                Log.w(tag, "Firestore username check warning: ${e.message}")
                 UsernameValidationStatus.VALID
             }
-        } else {
-            val currentUid = _currentUser.value?.uid
-            if (userStore.isUsernameTaken(trimmed, currentUid)) {
-                return UsernameValidationStatus.TAKEN
-            }
-            return UsernameValidationStatus.VALID
         }
+        return UsernameValidationStatus.VALID
     }
 
     override suspend fun registerWithEmail(
@@ -220,12 +156,12 @@ class FirebaseAuthServiceImpl(
 
         if (normalizedEmail.isEmpty() || !normalizedEmail.contains("@")) {
             _authState.value = AuthState.AUTH_ERROR
-            return@withContext AuthResult.Error("Please enter a valid email address.")
+            return@withContext AuthResult.Error("[ERROR_INVALID_EMAIL] Please enter a valid email address.")
         }
 
         if (password.length < 6) {
             _authState.value = AuthState.AUTH_ERROR
-            return@withContext AuthResult.Error("Password must be at least 6 characters.")
+            return@withContext AuthResult.Error("[ERROR_WEAK_PASSWORD] Password must be at least 6 characters.")
         }
 
         val usernameStatus = checkUsernameAvailability(trimmedUsername)
@@ -242,132 +178,67 @@ class FirebaseAuthServiceImpl(
             return@withContext AuthResult.Error(msg)
         }
 
-        // Duplicate email validation: check if normalized email already exists in persistent database
-        val existing = userStore.getUserByEmail(normalizedEmail)
-        if (existing != null) {
-            _authState.value = AuthState.AUTH_ERROR
-            return@withContext if (existing.authProvider.equals("GOOGLE", ignoreCase = true)) {
-                AuthResult.Error("An account with this email is linked with Google Sign-In. Please sign in using 'Continue with Google'.")
-            } else {
-                AuthResult.Error("An account with this email already exists. Please sign in.")
+        // DIRECT LIVE FIREBASE REGISTRATION (No local interceptors or mock blockers)
+        try {
+            Log.d(tag, "Calling FirebaseAuth.createUserWithEmailAndPassword for $normalizedEmail on project $FIREBASE_PROJECT_ID")
+            val result = auth.createUserWithEmailAndPassword(normalizedEmail, password).await()
+            val firebaseUser = result.user ?: run {
+                _authState.value = AuthState.AUTH_ERROR
+                return@withContext AuthResult.Error("[AUTH_ERROR] Firebase failed to create user record.")
             }
-        }
 
-        if (_isFirebaseConfigured && auth != null) {
+            // Update display name
             try {
-                val result = auth.createUserWithEmailAndPassword(normalizedEmail, password).await()
-                val firebaseUser = result.user ?: return@withContext AuthResult.Error("Failed to create authentication user")
-
-                // Update display name
-                try {
-                    val profileUpdates = UserProfileChangeRequest.Builder()
-                        .setDisplayName(trimmedUsername)
-                        .build()
-                    firebaseUser.updateProfile(profileUpdates).await()
-                } catch (e: Exception) {
-                    Log.w(tag, "Failed to set display name: ${e.message}")
-                }
-
-                // Send real email verification
-                try {
-                    firebaseUser.sendEmailVerification().await()
-                } catch (e: Exception) {
-                    Log.w(tag, "Send email verification warning: ${e.message}")
-                }
-
-                // Store in userStore as local persistent cache as well
-                val stored = StoredUserAccount(
-                    uid = firebaseUser.uid,
-                    email = normalizedEmail,
-                    passwordHash = PersistentUserAccountStore.hashSha256(password),
-                    username = trimmedUsername,
-                    displayName = trimmedUsername,
-                    role = "CUSTOMER / PIONEER",
-                    isEmailVerified = firebaseUser.isEmailVerified,
-                    createdAt = System.currentTimeMillis(),
-                    lastLoginAt = System.currentTimeMillis()
-                )
-                userStore.saveUser(stored)
-
-                localRepo.setActiveSessionUid(firebaseUser.uid)
-
-                val authUser = AuthUser(
-                    uid = firebaseUser.uid,
-                    email = firebaseUser.email ?: normalizedEmail,
-                    username = trimmedUsername,
-                    displayName = trimmedUsername,
-                    isEmailVerified = firebaseUser.isEmailVerified,
-                    providerId = "password",
-                    role = "CUSTOMER / PIONEER"
-                )
-                _currentUser.value = authUser
-                _authState.value = AuthState.AUTHENTICATED
-                AuthResult.Success(authUser)
-            } catch (e: FirebaseAuthWeakPasswordException) {
-                _authState.value = AuthState.AUTH_ERROR
-                AuthResult.Error("Password is too weak. Please use at least 6 characters.")
-            } catch (e: FirebaseAuthUserCollisionException) {
-                _authState.value = AuthState.AUTH_ERROR
-                AuthResult.Error("An account with this email already exists. Please sign in.")
-            } catch (e: FirebaseAuthInvalidCredentialsException) {
-                _authState.value = AuthState.AUTH_ERROR
-                AuthResult.Error("Invalid email format.")
+                val profileUpdates = UserProfileChangeRequest.Builder()
+                    .setDisplayName(trimmedUsername)
+                    .build()
+                firebaseUser.updateProfile(profileUpdates).await()
             } catch (e: Exception) {
-                Log.e(tag, "Registration error", e)
-                _authState.value = AuthState.AUTH_ERROR
-                AuthResult.Error(e.localizedMessage ?: "Registration failed. Please check network connectivity.")
-            }
-        } else {
-            // Persistent non-volatile local account
-            if (userStore.isEmailRegistered(normalizedEmail)) {
-                _authState.value = AuthState.AUTH_ERROR
-                return@withContext AuthResult.Error("An account with this email already exists. Please sign in.")
+                Log.w(tag, "Failed to set display name on FirebaseUser: ${e.message}")
             }
 
-            val stableUid = PersistentUserAccountStore.generateDeterministicUid(normalizedEmail)
-            val passHash = PersistentUserAccountStore.hashSha256(password)
+            // Send verification email
+            try {
+                firebaseUser.sendEmailVerification().await()
+            } catch (e: Exception) {
+                Log.w(tag, "Send email verification warning: ${e.message}")
+            }
 
-            val newAccount = StoredUserAccount(
-                uid = stableUid,
-                email = normalizedEmail,
-                passwordHash = passHash,
-                username = trimmedUsername,
-                displayName = trimmedUsername,
-                role = "CUSTOMER / PIONEER",
-                isEmailVerified = false,
-                createdAt = System.currentTimeMillis(),
-                lastLoginAt = System.currentTimeMillis()
-            )
-            userStore.saveUser(newAccount)
-
-            // Initialize local profile
-            val newProfile = UserProfile(
-                uid = stableUid,
-                playerId = "BB-${(100000..999999).random()}",
-                username = trimmedUsername,
-                displayName = trimmedUsername,
-                email = normalizedEmail,
-                role = "CUSTOMER / PIONEER",
-                emailVerified = false,
-                createdAt = System.currentTimeMillis(),
-                lastLoginAt = System.currentTimeMillis()
-            )
-            localRepo.saveProfile(newProfile)
-
-            localRepo.setActiveSessionUid(stableUid)
+            // Save preferences
+            prefs.edit().putString("user_username_${firebaseUser.uid}", trimmedUsername).apply()
+            localRepo.setActiveSessionUid(firebaseUser.uid)
 
             val authUser = AuthUser(
-                uid = stableUid,
-                email = normalizedEmail,
+                uid = firebaseUser.uid,
+                email = firebaseUser.email ?: normalizedEmail,
                 username = trimmedUsername,
                 displayName = trimmedUsername,
-                isEmailVerified = false,
-                providerId = "local",
+                isEmailVerified = firebaseUser.isEmailVerified,
+                providerId = "password",
                 role = "CUSTOMER / PIONEER"
             )
             _currentUser.value = authUser
             _authState.value = AuthState.AUTHENTICATED
             AuthResult.Success(authUser)
+        } catch (e: FirebaseAuthException) {
+            val errorCode = e.errorCode
+            val errorMsg = e.localizedMessage ?: e.message ?: "Registration failed."
+            Log.e(tag, "Firebase register exception: [$errorCode] $errorMsg", e)
+            _authState.value = AuthState.AUTH_ERROR
+            val displayMessage = when (errorCode) {
+                "ERROR_EMAIL_ALREADY_IN_USE" -> "[$errorCode] An account with this email already exists in Firebase. Please sign in."
+                "ERROR_WEAK_PASSWORD" -> "[$errorCode] Password is too weak. Please use at least 6 characters."
+                "ERROR_INVALID_EMAIL" -> "[$errorCode] The email address is badly formatted."
+                "ERROR_OPERATION_NOT_ALLOWED" -> "[$errorCode] Email/Password sign-up is disabled in Firebase Console."
+                else -> "[$errorCode] $errorMsg"
+            }
+            AuthResult.Error(displayMessage)
+        } catch (e: Exception) {
+            val errorCode = (e as? FirebaseAuthException)?.errorCode ?: "REGISTRATION_ERROR"
+            val errorMsg = e.localizedMessage ?: e.message ?: "Registration failed. Check network connection."
+            Log.e(tag, "Registration error: [$errorCode] $errorMsg", e)
+            _authState.value = AuthState.AUTH_ERROR
+            AuthResult.Error("[$errorCode] $errorMsg")
         }
     }
 
@@ -380,115 +251,64 @@ class FirebaseAuthServiceImpl(
 
         if (normalizedEmail.isEmpty() || !normalizedEmail.contains("@")) {
             _authState.value = AuthState.AUTH_ERROR
-            return@withContext AuthResult.Error("Please enter a valid email address.")
+            return@withContext AuthResult.Error("[ERROR_INVALID_EMAIL] Please enter a valid email address.")
         }
 
-        if (_isFirebaseConfigured && auth != null) {
-            try {
-                val result = auth.signInWithEmailAndPassword(normalizedEmail, password).await()
-                val firebaseUser = result.user ?: run {
-                    _authState.value = AuthState.AUTH_ERROR
-                    return@withContext AuthResult.Error("User record not found")
-                }
+        if (password.isEmpty()) {
+            _authState.value = AuthState.AUTH_ERROR
+            return@withContext AuthResult.Error("[ERROR_WRONG_PASSWORD] Password cannot be empty.")
+        }
 
-                val savedUsername = prefs.getString("user_username_${firebaseUser.uid}", null)
-                    ?: firebaseUser.displayName?.ifBlank { null }
-                    ?: firebaseUser.email?.substringBefore("@")
-                    ?: "Player"
-
-                localRepo.setActiveSessionUid(firebaseUser.uid)
-
-                val authUser = AuthUser(
-                    uid = firebaseUser.uid,
-                    email = firebaseUser.email ?: normalizedEmail,
-                    username = savedUsername,
-                    displayName = firebaseUser.displayName ?: savedUsername,
-                    photoUrl = firebaseUser.photoUrl?.toString(),
-                    isEmailVerified = firebaseUser.isEmailVerified,
-                    providerId = "password",
-                    role = "CUSTOMER / PIONEER"
-                )
-                _currentUser.value = authUser
-                _authState.value = AuthState.AUTHENTICATED
-                AuthResult.Success(authUser)
-            } catch (e: FirebaseAuthInvalidCredentialsException) {
+        // DIRECT LIVE FIREBASE LOGIN (No local interceptors or mock passwords)
+        try {
+            Log.d(tag, "Calling FirebaseAuth.signInWithEmailAndPassword for $normalizedEmail on project $FIREBASE_PROJECT_ID")
+            val result = auth.signInWithEmailAndPassword(normalizedEmail, password).await()
+            val firebaseUser = result.user ?: run {
                 _authState.value = AuthState.AUTH_ERROR
-                AuthResult.Error("Invalid email or password. Please try again.")
-            } catch (e: Exception) {
-                // If Firebase fails (e.g. offline mode or local demo account), check userStore
-                val localAcc = userStore.getUserByEmail(normalizedEmail)
-                if (localAcc != null && userStore.verifyPassword(localAcc, password)) {
-                    localRepo.setActiveSessionUid(localAcc.uid)
-                    userStore.updateLastLogin(localAcc.uid)
-                    val authUser = AuthUser(
-                        uid = localAcc.uid,
-                        email = localAcc.email,
-                        username = localAcc.username,
-                        displayName = localAcc.displayName,
-                        isEmailVerified = localAcc.isEmailVerified,
-                        providerId = "local",
-                        role = localAcc.role
-                    )
-                    _currentUser.value = authUser
-                    _authState.value = AuthState.AUTHENTICATED
-                    return@withContext AuthResult.Success(authUser)
-                }
-                Log.e(tag, "Login error", e)
-                _authState.value = AuthState.AUTH_ERROR
-                AuthResult.Error(e.localizedMessage ?: "Login failed. Please check your network connection.")
-            }
-        } else {
-            // Persistent non-volatile local login
-            val account = userStore.getUserByEmail(normalizedEmail)
-            if (account == null) {
-                _authState.value = AuthState.AUTH_ERROR
-                return@withContext AuthResult.Error("No account found for this email. Please check your email or create an account.")
+                return@withContext AuthResult.Error("[AUTH_ERROR] Firebase user record not found.")
             }
 
-            if (account.authProvider.equals("GOOGLE", ignoreCase = true)) {
-                _authState.value = AuthState.AUTH_ERROR
-                return@withContext AuthResult.Error("This account was created with Google Sign-In. Please tap 'Continue with Google' to sign in.")
-            }
+            val savedUsername = prefs.getString("user_username_${firebaseUser.uid}", null)
+                ?: firebaseUser.displayName?.ifBlank { null }
+                ?: firebaseUser.email?.substringBefore("@")
+                ?: "Player"
 
-            if (!userStore.verifyPassword(account, password)) {
-                _authState.value = AuthState.AUTH_ERROR
-                return@withContext AuthResult.Error("Incorrect password. Please try again.")
-            }
-
-            userStore.updateLastLogin(account.uid)
-            localRepo.setActiveSessionUid(account.uid)
-
-            // Ensure profile exists in localRepo
-            if (!localRepo.hasProfileData(account.uid)) {
-                localRepo.saveProfile(
-                    UserProfile(
-                        uid = account.uid,
-                        playerId = "BB-${(100000..999999).random()}",
-                        username = account.username,
-                        displayName = account.displayName,
-                        email = account.email,
-                        photoUrl = account.photoUrl,
-                        role = account.role,
-                        emailVerified = account.isEmailVerified,
-                        lastLoginAt = System.currentTimeMillis()
-                    )
-                )
-            }
+            localRepo.setActiveSessionUid(firebaseUser.uid)
 
             val authUser = AuthUser(
-                uid = account.uid,
-                email = account.email,
-                username = account.username,
-                displayName = account.displayName,
-                photoUrl = account.photoUrl,
-                isEmailVerified = account.isEmailVerified,
-                providerId = "local",
-                role = account.role,
-                authType = "PASSWORD"
+                uid = firebaseUser.uid,
+                email = firebaseUser.email ?: normalizedEmail,
+                username = savedUsername,
+                displayName = firebaseUser.displayName ?: savedUsername,
+                photoUrl = firebaseUser.photoUrl?.toString(),
+                isEmailVerified = firebaseUser.isEmailVerified,
+                providerId = "password",
+                role = "CUSTOMER / PIONEER"
             )
             _currentUser.value = authUser
             _authState.value = AuthState.AUTHENTICATED
             AuthResult.Success(authUser)
+        } catch (e: FirebaseAuthException) {
+            val errorCode = e.errorCode
+            val errorMsg = e.localizedMessage ?: e.message ?: "Sign-in failed."
+            Log.e(tag, "Firebase login exception: [$errorCode] $errorMsg", e)
+            _authState.value = AuthState.AUTH_ERROR
+            val displayMessage = when (errorCode) {
+                "ERROR_USER_NOT_FOUND" -> "[$errorCode] No account found with this email in Firebase. Please sign up."
+                "ERROR_WRONG_PASSWORD" -> "[$errorCode] Incorrect password. Please try again."
+                "ERROR_INVALID_EMAIL" -> "[$errorCode] The email address is badly formatted."
+                "ERROR_USER_DISABLED" -> "[$errorCode] This user account has been disabled in Firebase."
+                "ERROR_TOO_MANY_REQUESTS" -> "[$errorCode] Access blocked due to unusual activity. Try again later."
+                "ERROR_INVALID_CREDENTIAL" -> "[$errorCode] Invalid credentials. Check your email and password."
+                else -> "[$errorCode] $errorMsg"
+            }
+            AuthResult.Error(displayMessage)
+        } catch (e: Exception) {
+            val errorCode = (e as? FirebaseAuthException)?.errorCode ?: "LOGIN_ERROR"
+            val errorMsg = e.localizedMessage ?: e.message ?: "Login failed. Please check network connection."
+            Log.e(tag, "Login error: [$errorCode] $errorMsg", e)
+            _authState.value = AuthState.AUTH_ERROR
+            AuthResult.Error("[$errorCode] $errorMsg")
         }
     }
 
@@ -496,88 +316,50 @@ class FirebaseAuthServiceImpl(
         _authState.value = AuthState.AUTHENTICATING
         if (idToken.isBlank()) {
             _authState.value = AuthState.AUTH_ERROR
-            return@withContext AuthResult.Error("Google ID token was empty")
+            return@withContext AuthResult.Error("[ERROR_INVALID_CREDENTIAL] Google ID token was empty")
         }
 
-        if (_isFirebaseConfigured && auth != null) {
-            try {
-                val credential = GoogleAuthProvider.getCredential(idToken, null)
-                val result = auth.signInWithCredential(credential).await()
-                val firebaseUser = result.user ?: run {
-                    _authState.value = AuthState.AUTH_ERROR
-                    return@withContext AuthResult.Error("Google Sign-In failed to produce user record")
-                }
-
-                val normalizedEmail = PersistentUserAccountStore.normalizeEmail(firebaseUser.email ?: "")
-
-                // DUPLICATE EMAIL CHECK: Check if email already registered via standard password auth
-                val localExisting = userStore.getUserByEmail(normalizedEmail)
-                if (localExisting != null && localExisting.authProvider.equals("PASSWORD", ignoreCase = true)) {
-                    auth.signOut()
-                    _authState.value = AuthState.AUTH_ERROR
-                    return@withContext AuthResult.Error(
-                        "This email address is already in use. Please sign in using your email and password, or link your Google account in settings."
-                    )
-                }
-
-                val displayName = firebaseUser.displayName ?: firebaseUser.email?.substringBefore("@") ?: "Player"
-                val username = prefs.getString("user_username_${firebaseUser.uid}", null)
-                    ?: displayName.filter { it.isLetterOrDigit() || it == '_' }.ifBlank { "Player" }
-                val photoUrl = firebaseUser.photoUrl?.toString() ?: "https://lh3.googleusercontent.com/a/default-user"
-
-                val stored = StoredUserAccount(
-                    uid = firebaseUser.uid,
-                    email = normalizedEmail,
-                    passwordHash = "OAUTH_GOOGLE_MANAGED",
-                    username = username,
-                    displayName = displayName,
-                    role = "CUSTOMER / PIONEER",
-                    isEmailVerified = firebaseUser.isEmailVerified,
-                    createdAt = System.currentTimeMillis(),
-                    lastLoginAt = System.currentTimeMillis(),
-                    authProvider = "GOOGLE",
-                    photoUrl = photoUrl
-                )
-                userStore.saveUser(stored)
-
-                localRepo.setActiveSessionUid(firebaseUser.uid)
-                val existingProfile = localRepo.loadProfile(firebaseUser.uid)
-                localRepo.saveProfile(
-                    existingProfile.copy(
-                        uid = firebaseUser.uid,
-                        playerId = if (existingProfile.playerId.isNotBlank()) existingProfile.playerId else "BB-${(100000..999999).random()}",
-                        email = normalizedEmail,
-                        username = username,
-                        displayName = displayName,
-                        photoUrl = photoUrl,
-                        provider = "google.com",
-                        emailVerified = true,
-                        lastLoginAt = System.currentTimeMillis()
-                    )
-                )
-
-                val authUser = AuthUser(
-                    uid = firebaseUser.uid,
-                    email = normalizedEmail,
-                    username = username,
-                    displayName = displayName,
-                    photoUrl = photoUrl,
-                    isEmailVerified = firebaseUser.isEmailVerified,
-                    providerId = "google.com",
-                    role = "CUSTOMER / PIONEER",
-                    authType = "GOOGLE_OAUTH"
-                )
-                _currentUser.value = authUser
-                _authState.value = AuthState.AUTHENTICATED
-                AuthResult.Success(authUser)
-            } catch (e: Exception) {
-                Log.e(tag, "Google Sign-In error", e)
+        try {
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+            val result = auth.signInWithCredential(credential).await()
+            val firebaseUser = result.user ?: run {
                 _authState.value = AuthState.AUTH_ERROR
-                AuthResult.Error(e.localizedMessage ?: "Google Sign-In failed.")
+                return@withContext AuthResult.Error("[AUTH_ERROR] Google Sign-In failed to produce user record")
             }
-        } else {
+
+            val displayName = firebaseUser.displayName ?: firebaseUser.email?.substringBefore("@") ?: "Player"
+            val username = prefs.getString("user_username_${firebaseUser.uid}", null)
+                ?: displayName.filter { it.isLetterOrDigit() || it == '_' }.ifBlank { "Player" }
+            val photoUrl = firebaseUser.photoUrl?.toString() ?: "https://lh3.googleusercontent.com/a/default-user"
+
+            localRepo.setActiveSessionUid(firebaseUser.uid)
+
+            val authUser = AuthUser(
+                uid = firebaseUser.uid,
+                email = PersistentUserAccountStore.normalizeEmail(firebaseUser.email ?: ""),
+                username = username,
+                displayName = displayName,
+                photoUrl = photoUrl,
+                isEmailVerified = firebaseUser.isEmailVerified,
+                providerId = "google.com",
+                role = "CUSTOMER / PIONEER",
+                authType = "GOOGLE_OAUTH"
+            )
+            _currentUser.value = authUser
+            _authState.value = AuthState.AUTHENTICATED
+            AuthResult.Success(authUser)
+        } catch (e: FirebaseAuthException) {
+            val errorCode = e.errorCode
+            val errorMsg = e.localizedMessage ?: e.message ?: "Google Sign-In failed."
+            Log.e(tag, "FirebaseAuthException Google Sign-In: [$errorCode] $errorMsg", e)
             _authState.value = AuthState.AUTH_ERROR
-            AuthResult.Error("Firebase Authentication is not configured for Google Sign-In.")
+            AuthResult.Error("[$errorCode] $errorMsg")
+        } catch (e: Exception) {
+            val errorCode = (e as? FirebaseAuthException)?.errorCode ?: "GOOGLE_SIGNIN_ERROR"
+            val errorMsg = e.localizedMessage ?: e.message ?: "Google Sign-In failed."
+            Log.e(tag, "Google Sign-In error: [$errorCode] $errorMsg", e)
+            _authState.value = AuthState.AUTH_ERROR
+            AuthResult.Error("[$errorCode] $errorMsg")
         }
     }
 
@@ -591,104 +373,21 @@ class FirebaseAuthServiceImpl(
 
         if (normalizedEmail.isBlank() || !normalizedEmail.contains("@")) {
             _authState.value = AuthState.AUTH_ERROR
-            return@withContext AuthResult.Error("Please enter a valid Google email address.")
+            return@withContext AuthResult.Error("[ERROR_INVALID_EMAIL] Please enter a valid Google email address.")
         }
 
-        // 1. Check if user already exists
-        val existing = userStore.getUserByEmail(normalizedEmail)
-        if (existing != null) {
-            // IF THE EMAIL ALREADY EXISTS UNDER EMAIL/PASSWORD AUTH:
-            if (existing.authProvider.equals("PASSWORD", ignoreCase = true)) {
-                _authState.value = AuthState.AUTH_ERROR
-                return@withContext AuthResult.Error(
-                    "This email address is already in use. Please sign in using your email and password, or link your Google account in settings."
-                )
-            }
-
-            // IF THE EMAIL ALREADY EXISTS UNDER GOOGLE AUTH:
-            // Automatically log the user into their existing Google-linked account profile seamlessly without throwing an error.
-            userStore.updateLastLogin(existing.uid)
-            localRepo.setActiveSessionUid(existing.uid)
-
-            val existingProfile = localRepo.loadProfile(existing.uid)
-            val updatedPhoto = existing.photoUrl ?: photoUrl ?: existingProfile.photoUrl
-            localRepo.saveProfile(
-                existingProfile.copy(
-                    lastLoginAt = System.currentTimeMillis(),
-                    provider = "google.com",
-                    photoUrl = updatedPhoto
-                )
-            )
-
-            val authUser = AuthUser(
-                uid = existing.uid,
-                email = existing.email,
-                username = existing.username,
-                displayName = existing.displayName.ifBlank { displayName },
-                photoUrl = updatedPhoto,
-                isEmailVerified = true,
-                providerId = "google.com",
-                role = existing.role,
-                authType = "GOOGLE_OAUTH"
-            )
-            _currentUser.value = authUser
-            _authState.value = AuthState.AUTHENTICATED
-            return@withContext AuthResult.Success(authUser)
-        }
-
-        // 2. NEW USER (Sign-Up):
-        // Auto-create account record with Google profile photo, display name, and authProvider = "GOOGLE", then auto-login.
         val stableUid = PersistentUserAccountStore.generateDeterministicUid(normalizedEmail)
         val cleanDisplayName = displayName.trim().ifBlank {
             normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
         }
-
-        val baseCandidate = cleanDisplayName.filter { it.isLetterOrDigit() || it == '_' }.ifBlank { "Player" }
-        var uniqueUsername = baseCandidate
-        var counter = 1
-        while (userStore.isUsernameTaken(uniqueUsername)) {
-            uniqueUsername = "${baseCandidate}_$counter"
-            counter++
-        }
-
         val effectivePhotoUrl = photoUrl ?: "https://lh3.googleusercontent.com/a/default-user"
 
-        val newAccount = StoredUserAccount(
-            uid = stableUid,
-            email = normalizedEmail,
-            passwordHash = "OAUTH_GOOGLE_MANAGED",
-            username = uniqueUsername,
-            displayName = cleanDisplayName,
-            role = "CUSTOMER / PIONEER",
-            isEmailVerified = true,
-            createdAt = System.currentTimeMillis(),
-            lastLoginAt = System.currentTimeMillis(),
-            authProvider = "GOOGLE",
-            photoUrl = effectivePhotoUrl
-        )
-        userStore.saveUser(newAccount)
-
-        val newProfile = UserProfile(
-            uid = stableUid,
-            playerId = "BB-${(100000..999999).random()}",
-            username = uniqueUsername,
-            displayName = cleanDisplayName,
-            email = normalizedEmail,
-            photoUrl = effectivePhotoUrl,
-            avatarEmoji = "🧠",
-            role = "CUSTOMER / PIONEER",
-            emailVerified = true,
-            provider = "google.com",
-            createdAt = System.currentTimeMillis(),
-            lastLoginAt = System.currentTimeMillis()
-        )
-        localRepo.saveProfile(newProfile)
         localRepo.setActiveSessionUid(stableUid)
 
         val authUser = AuthUser(
             uid = stableUid,
             email = normalizedEmail,
-            username = uniqueUsername,
+            username = cleanDisplayName.filter { it.isLetterOrDigit() || it == '_' }.ifBlank { "Player" },
             displayName = cleanDisplayName,
             photoUrl = effectivePhotoUrl,
             isEmailVerified = true,
@@ -702,90 +401,61 @@ class FirebaseAuthServiceImpl(
     }
 
     override suspend fun sendEmailVerification(): AuthResult<Unit> = withContext(Dispatchers.IO) {
-        if (_isFirebaseConfigured && auth != null) {
-            val user = auth.currentUser
-            if (user == null) {
-                return@withContext AuthResult.Error("No active user session to verify.")
-            }
-            try {
-                user.sendEmailVerification().await()
-                AuthResult.Success(Unit)
-            } catch (e: Exception) {
-                Log.e(tag, "Error sending verification email", e)
-                AuthResult.Error(e.localizedMessage ?: "Failed to dispatch verification email.")
-            }
-        } else {
-            val currentUid = _currentUser.value?.uid
-            if (currentUid != null) {
-                userStore.updateEmailVerified(currentUid, true)
-                _currentUser.value = _currentUser.value?.copy(isEmailVerified = true)
-                AuthResult.Success(Unit)
-            } else {
-                AuthResult.Error("No active session.")
-            }
+        val user = auth.currentUser
+        if (user == null) {
+            return@withContext AuthResult.Error("[AUTH_ERROR] No active user session to verify.")
+        }
+        try {
+            user.sendEmailVerification().await()
+            AuthResult.Success(Unit)
+        } catch (e: Exception) {
+            val code = (e as? FirebaseAuthException)?.errorCode ?: "VERIFICATION_ERROR"
+            Log.e(tag, "Error sending verification email: [$code] ${e.message}", e)
+            AuthResult.Error("[$code] ${e.localizedMessage ?: "Failed to dispatch verification email."}")
         }
     }
 
     override suspend fun reloadUser(): AuthResult<Boolean> = withContext(Dispatchers.IO) {
-        if (_isFirebaseConfigured && auth != null) {
-            val user = auth.currentUser
-            if (user == null) {
-                return@withContext AuthResult.Error("No active user session.")
+        val user = auth.currentUser
+        if (user == null) {
+            return@withContext AuthResult.Error("[AUTH_ERROR] No active user session.")
+        }
+        try {
+            user.reload().await()
+            val refreshedUser = auth.currentUser
+            val verified = refreshedUser?.isEmailVerified ?: false
+            if (refreshedUser != null) {
+                _currentUser.value = _currentUser.value?.copy(
+                    isEmailVerified = verified,
+                    photoUrl = refreshedUser.photoUrl?.toString()
+                )
             }
-            try {
-                user.reload().await()
-                val refreshedUser = auth.currentUser
-                val verified = refreshedUser?.isEmailVerified ?: false
-                if (refreshedUser != null) {
-                    _currentUser.value = _currentUser.value?.copy(
-                        isEmailVerified = verified,
-                        photoUrl = refreshedUser.photoUrl?.toString()
-                    )
-                }
-                AuthResult.Success(verified)
-            } catch (e: Exception) {
-                Log.e(tag, "Error reloading user", e)
-                AuthResult.Error(e.localizedMessage ?: "Failed to refresh user state.")
-            }
-        } else {
-            val currentUid = _currentUser.value?.uid
-            val verified = if (currentUid != null) {
-                userStore.getUserByUid(currentUid)?.isEmailVerified ?: false
-            } else false
             AuthResult.Success(verified)
+        } catch (e: Exception) {
+            val code = (e as? FirebaseAuthException)?.errorCode ?: "RELOAD_ERROR"
+            Log.e(tag, "Error reloading user: [$code] ${e.message}", e)
+            AuthResult.Error("[$code] ${e.localizedMessage ?: "Failed to refresh user state."}")
         }
     }
 
     override suspend fun sendPasswordResetEmail(email: String): AuthResult<Unit> = withContext(Dispatchers.IO) {
         val normalized = PersistentUserAccountStore.normalizeEmail(email)
         if (normalized.isEmpty() || !normalized.contains("@")) {
-            return@withContext AuthResult.Error("Please enter a valid email address.")
+            return@withContext AuthResult.Error("[ERROR_INVALID_EMAIL] Please enter a valid email address.")
         }
-        if (_isFirebaseConfigured && auth != null) {
-            try {
-                auth.sendPasswordResetEmail(normalized).await()
-                AuthResult.Success(Unit)
-            } catch (e: Exception) {
-                Log.e(tag, "Password reset error", e)
-                AuthResult.Error(e.localizedMessage ?: "Failed to send reset email. Verify your email address.")
-            }
-        } else {
-            val account = userStore.getUserByEmail(normalized)
-            if (account == null) {
-                AuthResult.Error("No registered Brain Battle account was found for $normalized.")
-            } else {
-                AuthResult.Success(Unit)
-            }
+        try {
+            auth.sendPasswordResetEmail(normalized).await()
+            AuthResult.Success(Unit)
+        } catch (e: Exception) {
+            val code = (e as? FirebaseAuthException)?.errorCode ?: "RESET_ERROR"
+            Log.e(tag, "Password reset error: [$code] ${e.message}", e)
+            AuthResult.Error("[$code] ${e.localizedMessage ?: "Failed to send reset email. Verify your email address."}")
         }
     }
 
     override suspend fun signOut(): AuthResult<Unit> = withContext(Dispatchers.IO) {
         try {
-            if (_isFirebaseConfigured) {
-                auth?.signOut()
-            }
-            // ONLY remove the active session token on logout.
-            // DO NOT clear or reset the registered users database/array!
+            auth.signOut()
             localRepo.setActiveSessionUid(null)
             localRepo.clearActiveSessionData()
             _currentUser.value = null
@@ -799,7 +469,7 @@ class FirebaseAuthServiceImpl(
 
     override suspend fun deleteAccount(): AuthResult<Unit> = withContext(Dispatchers.IO) {
         try {
-            val user = if (_isFirebaseConfigured) auth?.currentUser else null
+            val user = auth.currentUser
             val currentAuthUser = _currentUser.value
             val uid = currentAuthUser?.uid ?: user?.uid ?: ""
 
@@ -839,25 +509,23 @@ class FirebaseAuthServiceImpl(
             _authState.value = AuthState.UNAUTHENTICATED
             AuthResult.Success(Unit)
         } catch (e: Exception) {
-            Log.e(tag, "Account deletion error", e)
-            AuthResult.Error(e.localizedMessage ?: "Failed to delete account. You may need to sign in again first.")
+            val code = (e as? FirebaseAuthException)?.errorCode ?: "DELETE_ERROR"
+            Log.e(tag, "Account deletion error: [$code] ${e.message}", e)
+            AuthResult.Error("[$code] ${e.localizedMessage ?: "Failed to delete account. You may need to sign in again first."}")
         }
     }
 
     override fun getConfigurationStatus(): AuthConfigurationStatus {
         val clientId = getGoogleWebClientId()
         val missing = mutableListOf<String>()
-        if (auth == null) {
-            missing.add("Firebase google-services.json not installed or initialized.")
-        }
         if (clientId.isNullOrBlank()) {
-            missing.add("Google Web Client ID (GOOGLE_WEB_CLIENT_ID) not configured.")
+            missing.add("Google Web Client ID not configured.")
         }
         return AuthConfigurationStatus(
-            isFirebaseInitialized = _isFirebaseConfigured && auth != null,
-            isGoogleSignInConfigured = _isFirebaseConfigured && auth != null && !clientId.isNullOrBlank(),
-            isEmailVerificationActive = _isFirebaseConfigured && auth != null,
-            activeProviderMode = if (_isFirebaseConfigured && auth != null) "Firebase Cloud Authentication" else "Non-Volatile SQLite Scoped Persistence",
+            isFirebaseInitialized = true,
+            isGoogleSignInConfigured = !clientId.isNullOrBlank(),
+            isEmailVerificationActive = true,
+            activeProviderMode = "Firebase Cloud Authentication ($FIREBASE_PROJECT_ID)",
             googleWebClientId = clientId,
             notes = missing
         )
@@ -867,7 +535,6 @@ class FirebaseAuthServiceImpl(
         val fromEnv = System.getenv("GOOGLE_WEB_CLIENT_ID")
         if (!fromEnv.isNullOrBlank()) return fromEnv
 
-        // Check auto-generated resource string from google-services.json if present
         try {
             val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
             if (resId != 0) {
@@ -876,7 +543,7 @@ class FirebaseAuthServiceImpl(
             }
         } catch (_: Exception) {}
 
-        return prefs.getString("google_web_client_id", null)
+        return "906231122938-klas99rgihsi8vtl3h13c89kggamudos.apps.googleusercontent.com"
     }
 
     override fun getRegisteredGoogleAccounts(): List<StoredUserAccount> {

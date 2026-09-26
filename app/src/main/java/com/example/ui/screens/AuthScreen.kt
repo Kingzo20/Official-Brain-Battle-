@@ -536,9 +536,17 @@ fun AuthScreen(
                     .height(52.dp)
                     .testTag("auth_google_button")
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "🌐", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.width(10.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_google_logo),
+                        contentDescription = "Google Logo",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = "CONTINUE WITH GOOGLE",
                         style = MaterialTheme.typography.titleMedium,
