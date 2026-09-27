@@ -5,7 +5,6 @@ import android.util.Log
 import com.example.data.local.LocalStorageRepository
 import com.example.model.UserProfile
 import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
@@ -26,14 +25,6 @@ class FirebaseAuthServiceImpl(
 
     private val tag = "FirebaseAuthService"
 
-    companion object {
-        const val FIREBASE_PROJECT_ID = "brain-battle-21d8b"
-        const val FIREBASE_APPLICATION_ID = "1:906231122938:android:7d6a9c9693d19199113243"
-        const val FIREBASE_API_KEY = "AIzaSyCVCcRkbrJxsUa5Q0uMQqUPCjXMrFYqp1c"
-        const val FIREBASE_GCM_SENDER_ID = "906231122938"
-        const val FIREBASE_STORAGE_BUCKET = "brain-battle-21d8b.firebasestorage.app"
-    }
-
     val userStore = PersistentUserAccountStore(context)
     private val localRepo = LocalStorageRepository(context)
     private val prefs = context.getSharedPreferences("brain_battle_auth", Context.MODE_PRIVATE)
@@ -41,14 +32,7 @@ class FirebaseAuthServiceImpl(
     private val auth: FirebaseAuth = try {
         val appContext = context.applicationContext ?: context
         if (FirebaseApp.getApps(appContext).isEmpty()) {
-            val options = FirebaseOptions.Builder()
-                .setApplicationId(FIREBASE_APPLICATION_ID)
-                .setApiKey(FIREBASE_API_KEY)
-                .setProjectId(FIREBASE_PROJECT_ID)
-                .setGcmSenderId(FIREBASE_GCM_SENDER_ID)
-                .setStorageBucket(FIREBASE_STORAGE_BUCKET)
-                .build()
-            FirebaseApp.initializeApp(appContext, options)
+            FirebaseApp.initializeApp(appContext)
         }
         FirebaseAuth.getInstance()
     } catch (e: Exception) {
@@ -180,7 +164,8 @@ class FirebaseAuthServiceImpl(
 
         // DIRECT LIVE FIREBASE REGISTRATION (No local interceptors or mock blockers)
         try {
-            Log.d(tag, "Calling FirebaseAuth.createUserWithEmailAndPassword for $normalizedEmail on project $FIREBASE_PROJECT_ID")
+            val projectId = auth.app.options.projectId ?: "firebase"
+            Log.d(tag, "Calling FirebaseAuth.createUserWithEmailAndPassword for $normalizedEmail on project $projectId")
             val result = auth.createUserWithEmailAndPassword(normalizedEmail, password).await()
             val firebaseUser = result.user ?: run {
                 _authState.value = AuthState.AUTH_ERROR
@@ -261,7 +246,8 @@ class FirebaseAuthServiceImpl(
 
         // DIRECT LIVE FIREBASE LOGIN (No local interceptors or mock passwords)
         try {
-            Log.d(tag, "Calling FirebaseAuth.signInWithEmailAndPassword for $normalizedEmail on project $FIREBASE_PROJECT_ID")
+            val projectId = auth.app.options.projectId ?: "firebase"
+            Log.d(tag, "Calling FirebaseAuth.signInWithEmailAndPassword for $normalizedEmail on project $projectId")
             val result = auth.signInWithEmailAndPassword(normalizedEmail, password).await()
             val firebaseUser = result.user ?: run {
                 _authState.value = AuthState.AUTH_ERROR
@@ -521,11 +507,12 @@ class FirebaseAuthServiceImpl(
         if (clientId.isNullOrBlank()) {
             missing.add("Google Web Client ID not configured.")
         }
+        val projId = auth.app.options.projectId ?: "configured"
         return AuthConfigurationStatus(
             isFirebaseInitialized = true,
             isGoogleSignInConfigured = !clientId.isNullOrBlank(),
             isEmailVerificationActive = true,
-            activeProviderMode = "Firebase Cloud Authentication ($FIREBASE_PROJECT_ID)",
+            activeProviderMode = "Firebase Cloud Authentication ($projId)",
             googleWebClientId = clientId,
             notes = missing
         )
