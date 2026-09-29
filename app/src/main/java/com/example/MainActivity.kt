@@ -5,13 +5,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ads.AdMobManager
 import com.example.data.GameRepository
@@ -20,11 +23,11 @@ import com.example.model.Difficulty
 import com.example.model.GameCategory
 import com.example.model.GameModeType
 import com.example.model.GameResult
+import com.example.ui.components.PrimaryButton
 import com.example.ui.navigation.BrainBattleBottomBar
 import com.example.ui.navigation.Screen
 import com.example.ui.screens.*
-import com.example.ui.theme.BackgroundDark
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.*
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -48,6 +51,7 @@ class MainActivity : ComponentActivity() {
                 var activeDifficulty by remember { mutableStateOf(Difficulty.MEDIUM) }
                 var currentResult by remember { mutableStateOf<GameResult?>(null) }
                 var activeChallengeRecord by remember { mutableStateOf<FriendChallengeRecord?>(null) }
+                var showDailyAlreadyCompletedDialog by remember { mutableStateOf(false) }
 
                 val userProfile by repository.userProfile.collectAsState()
                 LaunchedEffect(userProfile.isPremium) {
@@ -173,13 +177,17 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                             Screen.Home -> {
-                                HomeScreen(
+                                 HomeScreen(
                                     repository = repository,
                                     onPlayDailyChallenge = {
-                                        activeGameMode = GameModeType.DAILY_CHALLENGE
-                                        activeCategory = GameCategory.DAILY
-                                        activeDifficulty = Difficulty.MEDIUM
-                                        currentScreen = Screen.Game
+                                        if (repository.isDailyChallengeCompletedToday()) {
+                                            showDailyAlreadyCompletedDialog = true
+                                        } else {
+                                            activeGameMode = GameModeType.DAILY_CHALLENGE
+                                            activeCategory = GameCategory.DAILY
+                                            activeDifficulty = Difficulty.MEDIUM
+                                            currentScreen = Screen.Game
+                                        }
                                     },
                                     onQuickPlaySelected = { category ->
                                         activeGameMode = GameModeType.CATEGORY_BATTLE
@@ -212,21 +220,28 @@ class MainActivity : ComponentActivity() {
                                         activeGameMode = mode
                                         when (mode) {
                                             GameModeType.DAILY_CHALLENGE -> {
-                                                activeCategory = GameCategory.DAILY
-                                                activeDifficulty = Difficulty.MEDIUM
-                                                currentScreen = Screen.Game
+                                                if (repository.isDailyChallengeCompletedToday()) {
+                                                    showDailyAlreadyCompletedDialog = true
+                                                } else {
+                                                    activeCategory = GameCategory.DAILY
+                                                    activeDifficulty = Difficulty.MEDIUM
+                                                    currentScreen = Screen.Game
+                                                }
                                             }
-                                            GameModeType.SIXTY_SECOND_RUSH -> {
-                                                activeCategory = GameCategory.SPEED
-                                                activeDifficulty = Difficulty.HARD
+                                            GameModeType.QUICK_BATTLE, GameModeType.SIXTY_SECOND_RUSH -> {
+                                                activeCategory = GameCategory.MATH
+                                                activeDifficulty = Difficulty.MEDIUM
                                                 currentScreen = Screen.Game
                                             }
                                             GameModeType.ENDLESS_MODE -> {
                                                 activeCategory = GameCategory.LOGIC
-                                                activeDifficulty = Difficulty.MEDIUM
+                                                activeDifficulty = Difficulty.EASY
                                                 currentScreen = Screen.Game
                                             }
                                             GameModeType.CATEGORY_BATTLE -> {
+                                                currentScreen = Screen.CategorySelection
+                                            }
+                                            GameModeType.TARGETED_PRACTICE -> {
                                                 currentScreen = Screen.CategorySelection
                                             }
                                             GameModeType.FRIEND_CHALLENGE -> {
@@ -234,9 +249,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                             GameModeType.TOURNAMENTS -> {
                                                 currentScreen = Screen.Tournament
-                                            }
-                                            GameModeType.TARGETED_PRACTICE -> {
-                                                currentScreen = Screen.Statistics
                                             }
                                         }
                                     }
@@ -461,6 +473,58 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             }
+                        }
+
+                        if (showDailyAlreadyCompletedDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showDailyAlreadyCompletedDialog = false },
+                                containerColor = CardSurface,
+                                shape = RoundedCornerShape(22.dp),
+                                title = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("🔥", fontSize = 24.sp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "DAILY CHALLENGE COMPLETED",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Black,
+                                            color = TextPrimary
+                                        )
+                                    }
+                                },
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            text = "You've already completed today's official Daily Challenge and secured your streak reward!",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = TextSecondary
+                                        )
+                                        Text(
+                                            text = "Exactly one attempt is permitted per calendar day. Tomorrow's challenge will unlock at 00:00 UTC.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextMuted
+                                        )
+                                    }
+                                },
+                                confirmButton = {
+                                    PrimaryButton(
+                                        text = "PLAY QUICK BATTLE",
+                                        onClick = {
+                                            showDailyAlreadyCompletedDialog = false
+                                            activeGameMode = GameModeType.QUICK_BATTLE
+                                            activeCategory = GameCategory.MATH
+                                            activeDifficulty = Difficulty.MEDIUM
+                                            currentScreen = Screen.Game
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showDailyAlreadyCompletedDialog = false }) {
+                                        Text("CLOSE", color = TextMuted)
+                                    }
+                                }
+                            )
                         }
                     }
                 }

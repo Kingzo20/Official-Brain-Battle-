@@ -65,21 +65,27 @@ fun GameScreen(
         }
     }
 
+    val isPracticeMode = gameMode == GameModeType.TARGETED_PRACTICE
+    val isQuickBattle = gameMode == GameModeType.QUICK_BATTLE || gameMode == GameModeType.SIXTY_SECOND_RUSH
+    val isEndlessMode = gameMode == GameModeType.ENDLESS_MODE
+    val isDailyChallenge = gameMode == GameModeType.DAILY_CHALLENGE
+
     // Load questions based on chosen game mode or active friend challenge
     val questions = remember(category, difficulty, gameMode, activeChallenge) {
-        if (activeChallenge != null && activeChallenge.questionIds.isNotEmpty()) {
+        val initial = if (activeChallenge != null && activeChallenge.questionIds.isNotEmpty()) {
             val allApproved = repository.questionAdminService.getAllApprovedPool()
             val matched = activeChallenge.questionIds.mapNotNull { id -> allApproved.firstOrNull { it.id == id } }
             if (matched.isNotEmpty()) matched else repository.getQuestionsFor(category, difficulty).take(activeChallenge.questionCount)
         } else {
             when (gameMode) {
                 GameModeType.DAILY_CHALLENGE -> repository.getDailyQuestions()
-                GameModeType.SIXTY_SECOND_RUSH -> repository.getRushQuestions()
+                GameModeType.QUICK_BATTLE, GameModeType.SIXTY_SECOND_RUSH -> repository.getQuickBattleQuestions(category, difficulty)
                 GameModeType.ENDLESS_MODE -> repository.getEndlessQuestions()
-                GameModeType.TARGETED_PRACTICE -> repository.getPracticeQuestions(category, difficulty, 5)
+                GameModeType.TARGETED_PRACTICE -> repository.getPracticeQuestions(category, difficulty, 10)
                 else -> repository.getQuestionsFor(category, difficulty)
             }
         }
+        mutableStateListOf<Question>().apply { addAll(initial) }
     }
 
     var currentQuestionIndex by remember { mutableIntStateOf(0) }
@@ -94,16 +100,19 @@ fun GameScreen(
     var livesRemaining by remember { mutableIntStateOf(3) }
 
     // Timers
-    // Total timer for Daily (60s), Rush (60s). Per-round timer for others (60s total round or question timer)
+    // Total timer for Daily (60s), Rush (60s). Practice & Endless are untimed. Per-question timer for Quick Battle.
     val totalGameTime = when (gameMode) {
-        GameModeType.SIXTY_SECOND_RUSH -> 60
         GameModeType.DAILY_CHALLENGE -> 60
-        GameModeType.ENDLESS_MODE -> 120
-        GameModeType.TARGETED_PRACTICE -> 60
+        GameModeType.ENDLESS_MODE -> 0 // Untimed per game: ends upon reaching 0 lives
+        GameModeType.TARGETED_PRACTICE -> 0 // Untimed
         else -> 60
     }
     var remainingSeconds by remember { mutableIntStateOf(totalGameTime) }
     var elapsedSeconds by remember { mutableIntStateOf(0) }
+
+    // Per-question timer for Quick Battle
+    var questionTimerSeconds by remember { mutableIntStateOf(15) }
+    var questionTimerTotal by remember { mutableIntStateOf(15) }
 
     // Answer interaction states
     var selectedAnswerIndex by remember { mutableStateOf<Int?>(null) }
@@ -128,40 +137,129 @@ fun GameScreen(
     var showLifelineDialog by remember { mutableStateOf(false) }
     var lifelineNotice by remember { mutableStateOf<String?>(null) }
 
+    val currentQuestion: Question? = questions.getOrNull(currentQuestionIndex)
+
     LaunchedEffect(currentQuestionIndex) {
         eliminatedOptionIndices = emptySet()
         lifelineNotice = null
+        questionStartTimeMs = System.currentTimeMillis()
+        if (isQuickBattle) {
+            val qLimit = currentQuestion?.timeLimit ?: 15
+            questionTimerSeconds = qLimit
+            questionTimerTotal = qLimit
+        }
     }
 
-    val currentQuestion: Question? = questions.getOrNull(currentQuestionIndex)
+    fun finishGameSession() {
+        val totalAnswered = correctAnswersCount + incorrectAnswersCount
+        val finalResult = repository.recordGameFinished(
+            score = currentScore,
+            correctCount = correctAnswersCount,
+            totalQuestions = if (totalAnswered > 0) totalAnswered else questions.size,
+            timeSpentSeconds = elapsedSeconds.coerceAtLeast(1),
+            categoryTitle = when {
+                isDailyChallenge -> "Daily Challenge"
+                isQuickBattle -> "Quick Battle"
+                isEndlessMode -> "Endless Mode"
+                isPracticeMode -> "Practice • ${category.title}"
+                else -> category.title
+            },
+            gameMode = when {
+                isQuickBattle -> "quick"
+                isEndlessMode -> "endless"
+                isPracticeMode -> "practice"
+                isDailyChallenge -> "daily"
+                else -> gameMode.id
+            },
+            bestStreak = bestStreak
+        )
 
-    // Countdown Timer Loop
+        if (activeChallenge != null) {
+            val calcAccuracy = if (totalAnswered > 0) (correctAnswersCount * 100) / totalAnswered else 0
+            coroutineScope.launch {
+                repository.socialRepository.submitChallengeResult(
+                    challengeId = activeChallenge.challengeId,
+                    score = currentScore,
+                    accuracy = calcAccuracy,
+                    timeSpentSeconds = elapsedSeconds.coerceAtLeast(1)
+                )
+            }
+        }
+
+        onGameFinished(finalResult)
+    }
+
+    fun advanceNextQuestion() {
+        val isEndlessGameOver = isEndlessMode && livesRemaining <= 0
+
+        // In Endless Mode, if running low on questions, dynamically append more to enforce no fixed limit
+        if (isEndlessMode && !isEndlessGameOver && currentQuestionIndex >= questions.size - 2) {
+            val extraQuestions = repository.getEndlessQuestions()
+            questions.addAll(extraQuestions)
+        }
+
+        val isLastQuestion = !isEndlessMode && currentQuestionIndex >= questions.size - 1
+
+        if (!isEndlessGameOver && !isLastQuestion) {
+            currentQuestionIndex++
+            selectedAnswerIndex = null
+            isAnswerCorrect = null
+            feedbackMessage = null
+            explanationText = null
+            questionStartTimeMs = System.currentTimeMillis()
+            isProcessingAnswer = false
+        } else {
+            finishGameSession()
+        }
+    }
+
+    // Elapsed seconds counter for all modes
+    LaunchedEffect(isPaused) {
+        while (!isPaused) {
+            delay(1000)
+            elapsedSeconds += 1
+        }
+    }
+
+    // Quick Battle Countdown Timer Loop (per-question)
+    LaunchedEffect(isPaused, isProcessingAnswer, questionTimerSeconds, currentQuestionIndex) {
+        if (isQuickBattle && !isPaused && !isProcessingAnswer && questionTimerSeconds > 0) {
+            delay(1000)
+            questionTimerSeconds -= 1
+            if (questionTimerSeconds <= 5 && questionTimerSeconds > 0) {
+                audioHaptic.playCountdownSound(userSettings.soundEffects)
+            }
+        } else if (isQuickBattle && !isPaused && !isProcessingAnswer && questionTimerSeconds <= 0) {
+            isProcessingAnswer = true
+            isAnswerCorrect = false
+            feedbackMessage = "TIME'S UP! (0 PTS)"
+            explanationText = currentQuestion?.explanation
+            incorrectAnswersCount++
+            currentStreak = 0
+            audioHaptic.playWrongSound(userSettings.soundEffects)
+            audioHaptic.vibrate(userSettings.vibration, 80)
+        }
+    }
+
+    // Standard Countdown Timer Loop for timed modes (Daily, Rush, etc.)
     LaunchedEffect(isPaused, isProcessingAnswer, remainingSeconds) {
-        if (!isPaused && remainingSeconds > 0) {
+        if (!isQuickBattle && !isPracticeMode && !isEndlessMode && !isPaused && remainingSeconds > 0) {
             delay(1000)
             remainingSeconds -= 1
-            elapsedSeconds += 1
             if (remainingSeconds <= 5 && remainingSeconds > 0) {
                 audioHaptic.playCountdownSound(userSettings.soundEffects)
             }
-        } else if (!isPaused && remainingSeconds <= 0 && !isProcessingAnswer) {
-            // Time is up! Conclude game session
-            val finalResult = repository.recordGameFinished(
-                score = currentScore,
-                correctCount = correctAnswersCount,
-                totalQuestions = currentQuestionIndex + (if (selectedAnswerIndex != null) 1 else 0),
-                timeSpentSeconds = totalGameTime,
-                categoryTitle = when (gameMode) {
-                    GameModeType.DAILY_CHALLENGE -> "Daily Challenge"
-                    GameModeType.SIXTY_SECOND_RUSH -> "60-Second Rush"
-                    GameModeType.ENDLESS_MODE -> "Endless Mode"
-                    GameModeType.TARGETED_PRACTICE -> "Practice • ${category.title}"
-                    else -> category.title
-                },
-                gameMode = gameMode.id,
-                bestStreak = bestStreak
-            )
-            onGameFinished(finalResult)
+        } else if (!isQuickBattle && !isPracticeMode && !isEndlessMode && !isPaused && remainingSeconds <= 0 && !isProcessingAnswer) {
+            finishGameSession()
+        }
+    }
+
+    // Auto-advance logic for timed / competitive modes (Practice mode advances manually)
+    LaunchedEffect(isProcessingAnswer) {
+        if (isProcessingAnswer && !isPracticeMode) {
+            val waitDelay = if (isAnswerCorrect == false) 1500L else 1200L
+            delay(waitDelay)
+            advanceNextQuestion()
         }
     }
 
@@ -201,10 +299,11 @@ fun GameScreen(
 
                     // Question counter or Mode info
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        val headerText = when (gameMode) {
-                            GameModeType.SIXTY_SECOND_RUSH -> "Q ${currentQuestionIndex + 1}"
-                            GameModeType.ENDLESS_MODE -> "STREAK ${currentStreak} • Q ${currentQuestionIndex + 1}"
-                            GameModeType.TARGETED_PRACTICE -> "PRACTICE ${currentQuestionIndex + 1} / ${questions.size}"
+                        val headerText = when {
+                            isQuickBattle -> "QUICK BATTLE ${currentQuestionIndex + 1} / ${questions.size}"
+                            isEndlessMode -> "STREAK ${currentStreak} • Q ${currentQuestionIndex + 1}"
+                            isPracticeMode -> "PRACTICE ${currentQuestionIndex + 1} / ${questions.size}"
+                            isDailyChallenge -> "DAILY ${currentQuestionIndex + 1} / ${questions.size}"
                             else -> "QUESTION ${currentQuestionIndex + 1} / ${questions.size}"
                         }
                         Text(
@@ -216,7 +315,7 @@ fun GameScreen(
                         )
 
                         // If Endless Mode, display lives ❤️❤️❤️
-                        if (gameMode == GameModeType.ENDLESS_MODE) {
+                        if (isEndlessMode) {
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier.padding(top = 2.dp)
@@ -232,7 +331,7 @@ fun GameScreen(
                         }
                     }
 
-                    // Top Right: Report + Timer View
+                    // Top Right: Report + Timer / Mode View
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -253,7 +352,52 @@ fun GameScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        TimerView(remainingSeconds = remainingSeconds, totalSeconds = totalGameTime)
+
+                        if (isPracticeMode) {
+                            Surface(
+                                color = CardSurfaceElevated,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, CardSurfaceBorder)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("🧠", fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "UNTIMED",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        } else if (isEndlessMode) {
+                            Surface(
+                                color = CardSurfaceElevated,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, CardSurfaceBorder)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("♾️", fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "${elapsedSeconds}s",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        } else if (isQuickBattle) {
+                            TimerView(remainingSeconds = questionTimerSeconds, totalSeconds = questionTimerTotal)
+                        } else {
+                            TimerView(remainingSeconds = remainingSeconds, totalSeconds = totalGameTime)
+                        }
                     }
                 }
 
@@ -334,10 +478,11 @@ fun GameScreen(
 
                     QuestionCard(
                         questionText = currentQuestion.questionText,
-                        categoryTitle = when (gameMode) {
-                            GameModeType.DAILY_CHALLENGE -> "Daily • ${currentQuestion.categoryId.uppercase()}"
-                            GameModeType.SIXTY_SECOND_RUSH -> "Rush • ${currentQuestion.categoryId.uppercase()}"
-                            GameModeType.ENDLESS_MODE -> "Endless • ${currentQuestion.difficulty.title}"
+                        categoryTitle = when {
+                            isDailyChallenge -> "Daily • ${currentQuestion.categoryId.uppercase()}"
+                            isQuickBattle -> "Quick • ${currentQuestion.categoryId.uppercase()}"
+                            isEndlessMode -> "Endless • ${currentQuestion.difficulty.title}"
+                            isPracticeMode -> "Practice • ${category.title}"
                             else -> category.title
                         }
                     )
@@ -370,60 +515,110 @@ fun GameScreen(
                             }
 
                             if (explanationText != null) {
-                                Text(
-                                    text = explanationText ?: "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                                )
-                            }
-
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.padding(top = 2.dp)
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        isPaused = true
-                                        showExplanationDialog = true
-                                    },
-                                    modifier = Modifier.testTag("game_why_explanation_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Lightbulb,
-                                        contentDescription = null,
-                                        tint = NeonGold,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
+                                if (isPracticeMode) {
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = CardSurfaceElevated,
+                                        border = BorderStroke(1.5.dp, NeonCyan.copy(alpha = 0.5f)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp, vertical = 6.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(14.dp),
+                                            horizontalAlignment = Alignment.Start
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Lightbulb,
+                                                    contentDescription = null,
+                                                    tint = NeonGold,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "DETAILED EXPLANATION",
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    color = NeonGold,
+                                                    fontWeight = FontWeight.ExtraBold
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = explanationText ?: "",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = TextPrimary,
+                                                lineHeight = 22.sp
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            PrimaryButton(
+                                                text = if (currentQuestionIndex < questions.size - 1) "NEXT QUESTION ➔" else "COMPLETE PRACTICE",
+                                                onClick = { advanceNextQuestion() },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(46.dp),
+                                                testTag = "practice_next_question_button"
+                                            )
+                                        }
+                                    }
+                                } else {
                                     Text(
-                                        text = "WHY? (INSIGHT)",
-                                        color = NeonGold,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold
+                                        text = explanationText ?: "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                                     )
                                 }
+                            }
 
-                                TextButton(
-                                    onClick = {
-                                        isPaused = true
-                                        showReportDialog = true
-                                    },
-                                    modifier = Modifier.testTag("game_flag_question_button")
+                            if (!isPracticeMode) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(top = 2.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Flag,
-                                        contentDescription = null,
-                                        tint = TextMuted,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "REPORT",
-                                        color = TextMuted,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
+                                    TextButton(
+                                        onClick = {
+                                            isPaused = true
+                                            showExplanationDialog = true
+                                        },
+                                        modifier = Modifier.testTag("game_why_explanation_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lightbulb,
+                                            contentDescription = null,
+                                            tint = NeonGold,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "WHY? (INSIGHT)",
+                                            color = NeonGold,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    TextButton(
+                                        onClick = {
+                                            isPaused = true
+                                            showReportDialog = true
+                                        },
+                                        modifier = Modifier.testTag("game_flag_question_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Flag,
+                                            contentDescription = null,
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "REPORT",
+                                            color = TextMuted,
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -527,10 +722,16 @@ fun GameScreen(
                                 } else {
                                     currentStreak = 0
                                     incorrectAnswersCount++
-                                    feedbackMessage = "INCORRECT"
 
                                     if (gameMode == GameModeType.ENDLESS_MODE) {
                                         livesRemaining -= 1
+                                        if (livesRemaining <= 0) {
+                                            feedbackMessage = "GAME OVER! OUT OF LIVES (0 ❤️)"
+                                        } else {
+                                            feedbackMessage = "INCORRECT! ($livesRemaining ❤️ REMAINING)"
+                                        }
+                                    } else {
+                                        feedbackMessage = "INCORRECT"
                                     }
 
                                     audioHaptic.playWrongSound(userSettings.soundEffects)
@@ -544,59 +745,6 @@ fun GameScreen(
                 }
             } else {
                 LoadingStateView(message = "Preparing battle questions...")
-            }
-        }
-    }
-
-    // Auto-advance logic after feedback
-    LaunchedEffect(isProcessingAnswer) {
-        if (isProcessingAnswer) {
-            val waitDelay = if (isAnswerCorrect == false) 1500L else 1200L
-            delay(waitDelay)
-
-            // Check if Endless Mode game over
-            val isEndlessGameOver = gameMode == GameModeType.ENDLESS_MODE && livesRemaining <= 0
-            val isLastQuestion = currentQuestionIndex >= questions.size - 1
-
-            if (!isEndlessGameOver && !isLastQuestion) {
-                currentQuestionIndex++
-                selectedAnswerIndex = null
-                isAnswerCorrect = null
-                feedbackMessage = null
-                explanationText = null
-                questionStartTimeMs = System.currentTimeMillis()
-                isProcessingAnswer = false
-            } else {
-                // Game Finished!
-                val totalAnswered = correctAnswersCount + incorrectAnswersCount
-                val finalResult = repository.recordGameFinished(
-                    score = currentScore,
-                    correctCount = correctAnswersCount,
-                    totalQuestions = if (totalAnswered > 0) totalAnswered else questions.size,
-                    timeSpentSeconds = elapsedSeconds.coerceAtLeast(1),
-                    categoryTitle = when (gameMode) {
-                        GameModeType.DAILY_CHALLENGE -> "Daily Challenge"
-                        GameModeType.SIXTY_SECOND_RUSH -> "60-Second Rush"
-                        GameModeType.ENDLESS_MODE -> "Endless Mode"
-                        else -> category.title
-                    },
-                    gameMode = gameMode.id,
-                    bestStreak = bestStreak
-                )
-
-                if (activeChallenge != null) {
-                    val calcAccuracy = if (totalAnswered > 0) (correctAnswersCount * 100) / totalAnswered else 0
-                    coroutineScope.launch {
-                        repository.socialRepository.submitChallengeResult(
-                            challengeId = activeChallenge.challengeId,
-                            score = currentScore,
-                            accuracy = calcAccuracy,
-                            timeSpentSeconds = elapsedSeconds.coerceAtLeast(1)
-                        )
-                    }
-                }
-
-                onGameFinished(finalResult)
             }
         }
     }

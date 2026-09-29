@@ -33,16 +33,7 @@ fun CategoryScreen(
     var searchQuery by remember { mutableStateOf("") }
 
     val categories = remember {
-        listOf(
-            GameCategory.MATH,
-            GameCategory.NUMBERS,
-            GameCategory.LOGIC,
-            GameCategory.WORDS,
-            GameCategory.KNOWLEDGE,
-            GameCategory.SCIENCE,
-            GameCategory.PATTERNS,
-            GameCategory.SPEED
-        )
+        GameCategory.ALL_10_CATEGORIES
     }
 
     val filteredCategories = remember(searchQuery) {

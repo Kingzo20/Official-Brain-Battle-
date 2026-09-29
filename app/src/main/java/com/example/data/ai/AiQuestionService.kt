@@ -1,6 +1,7 @@
 package com.example.data.ai
 
 import com.example.BuildConfig
+import com.example.data.DedicatedCategoryQuestionPools
 import com.example.model.Difficulty
 import com.example.model.GameCategory
 import com.example.model.Question
@@ -193,6 +194,22 @@ class AiQuestionServiceImpl(
                 GameCategory.PATTERNS -> generatePatternsQuestion(difficulty)
                 GameCategory.SPEED -> generateSpeedQuestion(difficulty)
                 GameCategory.DAILY -> generateMathQuestion(difficulty)
+                GameCategory.GEOGRAPHY -> DedicatedCategoryQuestionPools.geographyQuestions
+                    .filter { it.difficulty == difficulty }
+                    .ifEmpty { DedicatedCategoryQuestionPools.geographyQuestions }
+                    .random()
+                GameCategory.MEMORY -> DedicatedCategoryQuestionPools.memoryQuestions
+                    .filter { it.difficulty == difficulty }
+                    .ifEmpty { DedicatedCategoryQuestionPools.memoryQuestions }
+                    .random()
+                GameCategory.RIDDLES -> DedicatedCategoryQuestionPools.riddleQuestions
+                    .filter { it.difficulty == difficulty }
+                    .ifEmpty { DedicatedCategoryQuestionPools.riddleQuestions }
+                    .random()
+                GameCategory.TECHNOLOGY -> DedicatedCategoryQuestionPools.technologyQuestions
+                    .filter { it.difficulty == difficulty }
+                    .ifEmpty { DedicatedCategoryQuestionPools.technologyQuestions }
+                    .random()
             }
             list.add(q)
         }

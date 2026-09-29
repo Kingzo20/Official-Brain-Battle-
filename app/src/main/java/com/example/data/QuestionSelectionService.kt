@@ -18,7 +18,8 @@ object QuestionSelectionService {
 
     /**
      * Retrieves questions for a specific category and difficulty.
-     * Guaranteed never to return empty or crash.
+     * Strictly enforces category routing: questions will ONLY be chosen from the requested topic.
+     * Randomizes order upon session start.
      */
     fun getQuestionsForCategory(
         category: GameCategory,
@@ -27,11 +28,28 @@ object QuestionSelectionService {
         excludeIds: Set<String> = emptySet(),
         pool: List<Question>? = null
     ): List<Question> {
-        val basePool = pool ?: QuestionBank.allQuestions
+        val dedicatedPool = when (category) {
+            GameCategory.MATH -> QuestionBank.mathQuestions
+            GameCategory.LOGIC -> QuestionBank.logicQuestions
+            GameCategory.SCIENCE -> QuestionBank.scienceQuestions
+            GameCategory.GEOGRAPHY -> QuestionBank.geographyQuestions
+            GameCategory.KNOWLEDGE -> QuestionBank.knowledgeQuestions
+            GameCategory.WORDS -> QuestionBank.wordsQuestions
+            GameCategory.MEMORY -> QuestionBank.memoryQuestions
+            GameCategory.PATTERNS -> QuestionBank.patternQuestions
+            GameCategory.RIDDLES -> QuestionBank.riddleQuestions
+            GameCategory.TECHNOLOGY -> QuestionBank.technologyQuestions
+            GameCategory.NUMBERS -> QuestionBank.numbersQuestions
+            GameCategory.SPEED -> QuestionBank.speedQuestions
+            GameCategory.DAILY -> pool ?: QuestionBank.allQuestions
+        }
+
+        // Strict category isolation: questions must strictly match this category ID
         val categoryPool = if (category == GameCategory.DAILY) {
-            basePool
+            dedicatedPool
         } else {
-            basePool.filter { it.categoryId.equals(category.id, ignoreCase = true) }
+            val approvedFromPool = pool?.filter { it.categoryId.equals(category.id, ignoreCase = true) } ?: emptyList()
+            (dedicatedPool + approvedFromPool).distinctBy { it.id }.filter { it.categoryId.equals(category.id, ignoreCase = true) }
         }
 
         // Filter by difficulty if provided
@@ -43,24 +61,23 @@ object QuestionSelectionService {
 
         val available = if (difficultyFiltered.isNotEmpty()) {
             difficultyFiltered.shuffled()
-        } else if (categoryPool.isNotEmpty()) {
-            categoryPool.shuffled()
         } else {
-            basePool.shuffled()
+            categoryPool.filter { !excludeIds.contains(it.id) }.shuffled()
         }
 
         val selected = available.take(count).toMutableList()
 
-        // If we still need more questions to reach requested count, fill from basePool
+        // If we still need more questions, strictly draw from the SAME category pool
         if (selected.size < count) {
-            val filler = basePool
+            val filler = categoryPool
                 .filter { q -> selected.none { it.id == q.id } && !excludeIds.contains(q.id) }
                 .shuffled()
                 .take(count - selected.size)
             selected.addAll(filler)
         }
 
-        return selected.map { randomizeOptions(it) }
+        // Shuffle questions on session start so order is never predictable
+        return selected.shuffled().map { randomizeOptions(it) }
     }
 
     /**
@@ -69,7 +86,7 @@ object QuestionSelectionService {
     fun getPracticeQuestions(
         category: GameCategory,
         difficulty: Difficulty,
-        count: Int = 5,
+        count: Int = 10,
         pool: List<Question>? = null
     ): List<Question> {
         return getQuestionsForCategory(
@@ -78,6 +95,23 @@ object QuestionSelectionService {
             count = count,
             pool = pool
         )
+    }
+
+    /**
+     * Quick Battle: exactly 10 questions with per-question timer pressure and competitive scoring.
+     */
+    fun getQuickBattleQuestions(
+        category: GameCategory? = null,
+        difficulty: Difficulty? = null,
+        count: Int = 10,
+        pool: List<Question>? = null
+    ): List<Question> {
+        return if (category != null && category != GameCategory.DAILY) {
+            getQuestionsForCategory(category = category, difficulty = difficulty, count = count, pool = pool)
+        } else {
+            val basePool = pool ?: QuestionBank.allQuestions
+            basePool.shuffled().take(count).map { randomizeOptions(it) }
+        }
     }
 
     /**
@@ -91,39 +125,44 @@ object QuestionSelectionService {
         val dateSeed = (year * 1000L + dayOfYear)
         val deterministicRandom = Random(dateSeed)
 
-        // Select 1 question each from 8 main categories, then 2 extra for 10 total
+        // Select 1 question each from all 10 main categories
         val categories = listOf(
             QuestionBank.mathQuestions,
-            QuestionBank.numbersQuestions,
             QuestionBank.logicQuestions,
-            QuestionBank.wordsQuestions,
-            QuestionBank.knowledgeQuestions,
             QuestionBank.scienceQuestions,
+            QuestionBank.geographyQuestions,
+            QuestionBank.knowledgeQuestions,
+            QuestionBank.wordsQuestions,
+            QuestionBank.memoryQuestions,
             QuestionBank.patternQuestions,
-            QuestionBank.speedQuestions
+            QuestionBank.riddleQuestions,
+            QuestionBank.technologyQuestions
         )
 
         val selected = mutableListOf<Question>()
 
-        // Pick one from each category deterministically
+        // Pick one from each of the 10 categories deterministically
         categories.forEach { pool ->
-            val index = deterministicRandom.nextInt(pool.size)
-            selected.add(pool[index])
+            if (pool.isNotEmpty()) {
+                val index = deterministicRandom.nextInt(pool.size)
+                selected.add(pool[index])
+            }
         }
 
-        // Pick 2 more unique questions from remaining pool
-        val remainingPool = QuestionBank.allQuestions
-            .filter { q -> selected.none { it.id == q.id } }
-            .shuffled(deterministicRandom)
-
-        selected.addAll(remainingPool.take(2))
+        // If fewer than 10, fill deterministically from allQuestions
+        if (selected.size < 10) {
+            val remainingPool = QuestionBank.allQuestions
+                .filter { q -> selected.none { it.id == q.id } }
+                .shuffled(deterministicRandom)
+            selected.addAll(remainingPool.take(10 - selected.size))
+        }
 
         // Shuffle the final 10 in a deterministic order for consistent player experience
         return selected.shuffled(deterministicRandom).map { randomizeOptions(it) }
     }
 
     /**
-     * Get a broad shuffled pool for 60-Second Rush.
+     * Get a broad shuffled pool for Rush / Quick mode.
      */
     fun getRushQuestions(count: Int = 30, pool: List<Question>? = null): List<Question> {
         val basePool = pool ?: QuestionBank.allQuestions
@@ -132,22 +171,17 @@ object QuestionSelectionService {
 
     /**
      * Endless Mode questions ordered by scaling difficulty:
-     * Starts with EASY, then MEDIUM, then HARD, then EXTREME.
+     * Starts with EASY, then scales to MEDIUM, then HARD, then EXTREME.
      */
-    fun getEndlessPool(count: Int = 50, pool: List<Question>? = null): List<Question> {
+    fun getEndlessPool(count: Int = 100, pool: List<Question>? = null): List<Question> {
         val basePool = pool ?: QuestionBank.allQuestions
         val easy = basePool.filter { it.difficulty == Difficulty.EASY }.shuffled()
         val medium = basePool.filter { it.difficulty == Difficulty.MEDIUM }.shuffled()
         val hard = basePool.filter { it.difficulty == Difficulty.HARD }.shuffled()
         val extreme = basePool.filter { it.difficulty == Difficulty.EXTREME }.shuffled()
 
-        val ordered = mutableListOf<Question>()
-        ordered.addAll(easy)
-        ordered.addAll(medium)
-        ordered.addAll(hard)
-        ordered.addAll(extreme)
-
-        val result = if (ordered.size >= count) ordered.take(count) else ordered
-        return result.map { randomizeOptions(it) }
+        // Progressive sequence: Easy -> Medium -> Hard -> Extreme
+        val progressive = (easy + medium + hard + extreme).take(count)
+        return progressive.map { randomizeOptions(it) }
     }
 }

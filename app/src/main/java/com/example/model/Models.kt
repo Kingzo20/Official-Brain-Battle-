@@ -15,17 +15,30 @@ enum class GameCategory(
     val defaultDifficulty: Difficulty,
     val xpReward: Int
 ) {
-    MATH("math", "Math Challenge", "🧮", "Quick arithmetic, equations & percentages", Difficulty.MEDIUM, 150),
+    MATH("math", "Mathematics", "🧮", "Calculation & math problems", Difficulty.MEDIUM, 150),
+    LOGIC("logic", "Logic", "🧩", "Logical reasoning & deduction puzzles", Difficulty.HARD, 200),
+    SCIENCE("science", "Science", "🧪", "General science, physics, biology & chemistry", Difficulty.HARD, 190),
+    GEOGRAPHY("geography", "Geography", "🗺️", "Countries, locations, capitals & landmarks", Difficulty.MEDIUM, 175),
+    KNOWLEDGE("knowledge", "General Knowledge", "🌍", "Trivia, world history & broad domain facts", Difficulty.MEDIUM, 175),
+    WORDS("words", "Word & Vocabulary", "🔤", "Vocabulary, word definitions & word problems", Difficulty.EASY, 140),
+    MEMORY("memory", "Memory", "🧠", "Memory-based question & recall gameplay", Difficulty.MEDIUM, 180),
+    PATTERNS("patterns", "Patterns", "🔷", "Sequences & visual/numeric pattern recognition", Difficulty.MEDIUM, 180),
+    RIDDLES("riddles", "Riddles", "💡", "Brain teasers, clever wordplay & riddles", Difficulty.HARD, 200),
+    TECHNOLOGY("technology", "Technology", "💻", "Tech, computing, AI & modern systems", Difficulty.HARD, 200),
+
+    // Backward-compatibility aliases
     NUMBERS("numbers", "Number Puzzle", "🔢", "Sequences, missing digits & matrices", Difficulty.MEDIUM, 160),
-    LOGIC("logic", "Logic & IQ", "🧩", "Deductions, riddles & syllogisms", Difficulty.HARD, 200),
-    WORDS("words", "Word Challenge", "🔤", "Anagrams, vocabulary & antonyms", Difficulty.EASY, 140),
-    KNOWLEDGE("knowledge", "General Knowledge", "🌍", "World history, geography & culture", Difficulty.MEDIUM, 175),
-    SCIENCE("science", "Science Quiz", "🧪", "Physics, biology, space & chemistry", Difficulty.HARD, 190),
-    PATTERNS("patterns", "Pattern Recognition", "🔷", "Visual sequences & spatial rotation", Difficulty.MEDIUM, 180),
     SPEED("speed", "Speed Challenge", "⚡", "Rapid-fire reflexes under time pressure", Difficulty.HARD, 220),
     DAILY("daily", "Daily Challenge", "🔥", "Curated daily test for max streak bonus", Difficulty.MEDIUM, 250);
 
     val icon: String get() = iconEmoji
+
+    companion object {
+        val ALL_10_CATEGORIES: List<GameCategory> = listOf(
+            MATH, LOGIC, SCIENCE, GEOGRAPHY, KNOWLEDGE,
+            WORDS, MEMORY, PATTERNS, RIDDLES, TECHNOLOGY
+        )
+    }
 }
 
 enum class GameModeType(
@@ -36,13 +49,14 @@ enum class GameModeType(
     val reward: String,
     val iconEmoji: String
 ) {
-    DAILY_CHALLENGE("daily", "DAILY CHALLENGE", "10 mixed questions. Fresh puzzle set every 24 hours.", "Adaptive", "+250 XP + Streak", "🔥"),
-    SIXTY_SECOND_RUSH("rush", "60-SECOND RUSH", "Answer as many rapid questions as you can before the clock expires!", "Speed", "+200 XP", "⚡"),
-    ENDLESS_MODE("endless", "ENDLESS MODE", "Keep playing until you miss 3 lives. Compete for highest streak.", "Scaling", "+15 XP / Q", "♾️"),
-    CATEGORY_BATTLE("category", "CATEGORY BATTLE", "Target specific mental skills: Math, Logic, Science, Words & more.", "Custom", "+180 XP", "🎯"),
-    TARGETED_PRACTICE("practice", "TARGETED PRACTICE", "Adaptive drill tailored specifically to strengthen your cognitive focus area.", "Adaptive", "+160 XP", "🧠"),
-    FRIEND_CHALLENGE("friend", "FRIEND CHALLENGE", "Send a custom room code to challenge friends to beat your score.", "Versus", "+150 XP", "👥"),
-    TOURNAMENTS("tournaments", "TOURNAMENTS", "Compete on the weekly leaderboard bracket for grand champion trophies.", "Competitive", "Trophies & Badges", "🏆")
+    QUICK_BATTLE("quick", "QUICK BATTLE", "10 questions under per-question timer pressure. Competitive leaderboard updates.", "Competitive", "+200 XP • Ranked", "⚡"),
+    TARGETED_PRACTICE("practice", "PRACTICE", "Untimed or relaxed learning with detailed answer explanations after each question.", "Learning", "Skills & Explanations", "🧠"),
+    ENDLESS_MODE("endless", "ENDLESS", "Continuous questions scaling from Easy to Hard. Ends when you run out of lives.", "Scaling", "+15 XP / Question", "♾️"),
+    DAILY_CHALLENGE("daily", "DAILY CHALLENGE", "Fixed daily seed question set. Exactly one attempt permitted per calendar day.", "Daily Seed", "+250 XP + Daily Streak", "🔥"),
+    FRIEND_CHALLENGE("friend", "FRIEND CHALLENGE", "Head-to-head match using custom room code challenge system.", "Versus", "+150 XP • Direct Match", "👥"),
+    CATEGORY_BATTLE("category", "CATEGORY BATTLE", "Target specific mental skills across 10 dedicated category pools.", "Custom", "+180 XP", "🎯"),
+    TOURNAMENTS("tournaments", "TOURNAMENTS", "Compete on the weekly leaderboard bracket for grand champion trophies.", "Competitive", "Trophies & Badges", "🏆"),
+    SIXTY_SECOND_RUSH("rush", "60-SECOND RUSH", "Answer as many rapid questions as you can before the clock expires!", "Speed", "+200 XP", "⏱️");
 }
 
 enum class QuestionSource {

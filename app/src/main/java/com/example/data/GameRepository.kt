@@ -438,7 +438,8 @@ class GameRepository(context: Context? = null) {
                 }
             }
 
-            if (antiCheat.isEligibleForLeaderboard && validScore > 0) {
+            val isPracticeMode = gameMode == GameModeType.TARGETED_PRACTICE.id || gameMode == "practice"
+            if (!isPracticeMode && antiCheat.isEligibleForLeaderboard && validScore > 0) {
                 leaderboardService.submitGameScore(
                     gameId = gameId,
                     profile = updatedProfile,
@@ -618,6 +619,15 @@ class GameRepository(context: Context? = null) {
 
     fun getDailyQuestions(): List<Question> {
         return QuestionSelectionService.getDailyChallengeQuestions()
+    }
+
+    fun getQuickBattleQuestions(category: GameCategory? = null, difficulty: Difficulty? = null): List<Question> {
+        return QuestionSelectionService.getQuickBattleQuestions(
+            category = category,
+            difficulty = difficulty,
+            count = 10,
+            pool = questionAdminService.getAllApprovedPool()
+        )
     }
 
     fun getRushQuestions(): List<Question> {

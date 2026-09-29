@@ -1789,8 +1789,14 @@ object QuestionBank {
         )
     )
 
+    val geographyQuestions: List<Question> get() = DedicatedCategoryQuestionPools.geographyQuestions
+    val memoryQuestions: List<Question> get() = DedicatedCategoryQuestionPools.memoryQuestions
+    val riddleQuestions: List<Question> get() = DedicatedCategoryQuestionPools.riddleQuestions
+    val technologyQuestions: List<Question> get() = DedicatedCategoryQuestionPools.technologyQuestions
+
     val allQuestions: List<Question> by lazy {
         mathQuestions + numbersQuestions + logicQuestions + wordsQuestions +
-                knowledgeQuestions + scienceQuestions + patternQuestions + speedQuestions
+                knowledgeQuestions + scienceQuestions + patternQuestions + speedQuestions +
+                geographyQuestions + memoryQuestions + riddleQuestions + technologyQuestions
     }
 }
