@@ -639,7 +639,7 @@ class SocialRepository(
         gameMode: String = "friend_challenge",
         difficulty: String,
         questionCount: Int = 5,
-        timeLimitSeconds: Int = 60,
+        timeLimitSeconds: Int = 120,
         questionIds: List<String> = emptyList()
     ): FriendChallengeRecord = withContext(Dispatchers.IO) {
         val currentUser = currentProfileProvider()

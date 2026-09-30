@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -836,33 +837,65 @@ fun QuestionCard(
 @Composable
 fun TimerView(
     remainingSeconds: Int,
-    totalSeconds: Int = 60,
+    totalSeconds: Int = 120,
     modifier: Modifier = Modifier
 ) {
-    val progress = (remainingSeconds.toFloat() / totalSeconds).coerceIn(0f, 1f)
-    val isLowTime = remainingSeconds <= 10
-    val timerColor = if (isLowTime) NeonRed else NeonCyan
+    val animatedProgress by animateFloatAsState(
+        targetValue = if (totalSeconds > 0) (remainingSeconds.toFloat() / totalSeconds.toFloat()).coerceIn(0f, 1f) else 1f,
+        animationSpec = tween(durationMillis = 500, easing = LinearEasing),
+        label = "TimerProgress"
+    )
+    val isLowTime = remainingSeconds <= 20
+    val isCriticalTime = remainingSeconds <= 10
+    val timerColor = when {
+        isCriticalTime -> NeonRed
+        isLowTime -> NeonAmber
+        else -> NeonCyan
+    }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        color = CardSurfaceElevated,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, if (isLowTime) timerColor.copy(alpha = 0.6f) else CardSurfaceBorder),
         modifier = modifier
     ) {
-        Icon(
-            imageVector = Icons.Default.Timer,
-            contentDescription = "Timer",
-            tint = timerColor,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        val minutes = remainingSeconds / 60
-        val seconds = remainingSeconds % 60
-        val formattedTime = String.format("%02d:%02d", minutes, seconds)
-        Text(
-            text = formattedTime,
-            style = MaterialTheme.typography.titleMedium,
-            color = timerColor,
-            fontWeight = FontWeight.ExtraBold
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            // Prominent Countdown Ring
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(28.dp)
+            ) {
+                CircularProgressIndicator(
+                    progress = { animatedProgress },
+                    modifier = Modifier.size(26.dp),
+                    color = timerColor,
+                    strokeWidth = 3.dp,
+                    trackColor = CardSurfaceBorder.copy(alpha = 0.4f),
+                    strokeCap = StrokeCap.Round
+                )
+                Icon(
+                    imageVector = Icons.Default.Timer,
+                    contentDescription = "Timer",
+                    tint = timerColor,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            val minutes = remainingSeconds / 60
+            val seconds = remainingSeconds % 60
+            val formattedTime = String.format("%02d:%02d", minutes, seconds)
+            Text(
+                text = formattedTime,
+                style = MaterialTheme.typography.titleMedium,
+                color = timerColor,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.sp,
+                letterSpacing = 0.5.sp
+            )
+        }
     }
 }
 

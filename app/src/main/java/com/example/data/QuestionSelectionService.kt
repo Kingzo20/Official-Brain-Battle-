@@ -7,7 +7,26 @@ import java.util.Calendar
 import java.util.TimeZone
 import kotlin.random.Random
 
+data class QuestionSelectionResult(
+    val questions: List<Question>,
+    val wasExhaustedAndRecycled: Boolean = false
+)
+
 object QuestionSelectionService {
+
+    /**
+     * Maps the active player level to progressive difficulty tiers:
+     * - Level 1–5: EASY
+     * - Level 6–10: MEDIUM
+     * - Level 11+: HARD (with EXTREME)
+     */
+    fun getDifficultyTierForLevel(level: Int): Difficulty {
+        return when {
+            level <= 5 -> Difficulty.EASY
+            level <= 10 -> Difficulty.MEDIUM
+            else -> Difficulty.HARD
+        }
+    }
 
     /**
      * Randomizes the order of answer options while preserving correct answer integrity.
@@ -17,17 +36,19 @@ object QuestionSelectionService {
     }
 
     /**
-     * Retrieves questions for a specific category and difficulty.
-     * Strictly enforces category routing: questions will ONLY be chosen from the requested topic.
-     * Randomizes order upon session start.
+     * Retrieves questions for a specific category with strict history tracking and level-based progression.
+     * - Strictly excludes all previously seen question IDs (filterNot { it.id in excludeIds }).
+     * - Serves completely unseen questions matching the player's level tier.
+     * - Only resets or recycles questions after the player has completely exhausted the category pool.
      */
-    fun getQuestionsForCategory(
+    fun getQuestionsForCategoryWithHistory(
         category: GameCategory,
-        difficulty: Difficulty?,
+        difficulty: Difficulty? = null,
+        playerLevel: Int = 1,
         count: Int = 10,
         excludeIds: Set<String> = emptySet(),
         pool: List<Question>? = null
-    ): List<Question> {
+    ): QuestionSelectionResult {
         val dedicatedPool = when (category) {
             GameCategory.MATH -> QuestionBank.mathQuestions
             GameCategory.LOGIC -> QuestionBank.logicQuestions
@@ -52,32 +73,74 @@ object QuestionSelectionService {
             (dedicatedPool + approvedFromPool).distinctBy { it.id }.filter { it.categoryId.equals(category.id, ignoreCase = true) }
         }
 
-        // Filter by difficulty if provided
-        val difficultyFiltered = if (difficulty != null) {
-            categoryPool.filter { it.difficulty == difficulty && !excludeIds.contains(it.id) }
-        } else {
-            categoryPool.filter { !excludeIds.contains(it.id) }
+        // Progressive difficulty tier matching the active player level
+        val targetDifficulty = difficulty ?: getDifficultyTierForLevel(playerLevel)
+
+        // 1. Strictly exclude all previously seen question IDs
+        var unseenPool = categoryPool.filterNot { it.id in excludeIds }
+        var wasExhausted = false
+
+        // 2. Only reset or recycle questions after the player has completely exhausted the category pool
+        if (unseenPool.size < count) {
+            wasExhausted = true
+            unseenPool = categoryPool
         }
 
-        val available = if (difficultyFiltered.isNotEmpty()) {
-            difficultyFiltered.shuffled()
-        } else {
-            categoryPool.filter { !excludeIds.contains(it.id) }.shuffled()
+        // 3. Level-based question progression: prioritize questions matching active difficulty tier
+        val tierQuestions = unseenPool.filter {
+            if (targetDifficulty == Difficulty.HARD) {
+                it.difficulty == Difficulty.HARD || it.difficulty == Difficulty.EXTREME
+            } else {
+                it.difficulty == targetDifficulty
+            }
+        }.shuffled()
+
+        val selected = tierQuestions.take(count).toMutableList()
+
+        // If tier questions are fewer than count, draw remaining unseen questions from the same category
+        if (selected.size < count) {
+            val adjacentUnseen = unseenPool
+                .filterNot { q -> selected.any { it.id == q.id } }
+                .shuffled()
+            selected.addAll(adjacentUnseen.take(count - selected.size))
         }
 
-        val selected = available.take(count).toMutableList()
-
-        // If we still need more questions, strictly draw from the SAME category pool
+        // If still fewer than count (e.g. initial count requested > unseen), fill from recycled category pool
         if (selected.size < count) {
             val filler = categoryPool
-                .filter { q -> selected.none { it.id == q.id } && !excludeIds.contains(q.id) }
+                .filterNot { q -> selected.any { it.id == q.id } }
                 .shuffled()
-                .take(count - selected.size)
-            selected.addAll(filler)
+            selected.addAll(filler.take(count - selected.size))
         }
 
-        // Shuffle questions on session start so order is never predictable
-        return selected.shuffled().map { randomizeOptions(it) }
+        // Shuffle questions and randomize answer option order
+        val finalQuestions = selected.shuffled().map { randomizeOptions(it) }
+        return QuestionSelectionResult(
+            questions = finalQuestions,
+            wasExhaustedAndRecycled = wasExhausted
+        )
+    }
+
+    /**
+     * Retrieves questions for a specific category and difficulty.
+     * Strictly enforces category routing: questions will ONLY be chosen from the requested topic.
+     * Randomizes order upon session start.
+     */
+    fun getQuestionsForCategory(
+        category: GameCategory,
+        difficulty: Difficulty?,
+        count: Int = 10,
+        excludeIds: Set<String> = emptySet(),
+        pool: List<Question>? = null
+    ): List<Question> {
+        return getQuestionsForCategoryWithHistory(
+            category = category,
+            difficulty = difficulty,
+            playerLevel = 1,
+            count = count,
+            excludeIds = excludeIds,
+            pool = pool
+        ).questions
     }
 
     /**

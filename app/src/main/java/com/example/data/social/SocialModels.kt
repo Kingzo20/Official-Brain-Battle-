@@ -124,7 +124,7 @@ data class FriendChallengeRecord(
     val gameMode: String = "friend_challenge",
     val difficulty: String = Difficulty.MEDIUM.name,
     val questionCount: Int = 5,
-    val timeLimitSeconds: Int = 60,
+    val timeLimitSeconds: Int = 120,
     val rules: String = "Standard Battle: Highest score wins. Tiebreaker: Accuracy, then speed.",
     val status: ChallengeStatus = ChallengeStatus.SENT,
     val createdAt: Long = System.currentTimeMillis(),

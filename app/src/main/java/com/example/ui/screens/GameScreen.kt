@@ -3,6 +3,8 @@ package com.example.ui.screens
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -20,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -100,12 +103,13 @@ fun GameScreen(
     var livesRemaining by remember { mutableIntStateOf(3) }
 
     // Timers
-    // Total timer for Daily (60s), Rush (60s). Practice & Endless are untimed. Per-question timer for Quick Battle.
+    // Total timer: 120 seconds (2 full minutes) for overall match round clock
     val totalGameTime = when (gameMode) {
-        GameModeType.DAILY_CHALLENGE -> 60
+        GameModeType.DAILY_CHALLENGE -> 120
         GameModeType.ENDLESS_MODE -> 0 // Untimed per game: ends upon reaching 0 lives
         GameModeType.TARGETED_PRACTICE -> 0 // Untimed
-        else -> 60
+        GameModeType.SIXTY_SECOND_RUSH -> 120
+        else -> 120
     }
     var remainingSeconds by remember { mutableIntStateOf(totalGameTime) }
     var elapsedSeconds by remember { mutableIntStateOf(0) }
@@ -152,6 +156,7 @@ fun GameScreen(
 
     fun finishGameSession() {
         val totalAnswered = correctAnswersCount + incorrectAnswersCount
+        val answeredIds = questions.take(currentQuestionIndex + 1).map { it.id }
         val finalResult = repository.recordGameFinished(
             score = currentScore,
             correctCount = correctAnswersCount,
@@ -171,7 +176,9 @@ fun GameScreen(
                 isDailyChallenge -> "daily"
                 else -> gameMode.id
             },
-            bestStreak = bestStreak
+            bestStreak = bestStreak,
+            answeredQuestionIds = answeredIds,
+            categoryId = category.id
         )
 
         if (activeChallenge != null) {
@@ -241,15 +248,15 @@ fun GameScreen(
         }
     }
 
-    // Standard Countdown Timer Loop for timed modes (Daily, Rush, etc.)
+    // Standard Countdown Timer Loop for timed modes (Daily, Rush, Quick Battle, Category Battle, Friend Challenge)
     LaunchedEffect(isPaused, isProcessingAnswer, remainingSeconds) {
-        if (!isQuickBattle && !isPracticeMode && !isEndlessMode && !isPaused && remainingSeconds > 0) {
+        if (!isPracticeMode && !isEndlessMode && !isPaused && remainingSeconds > 0) {
             delay(1000)
             remainingSeconds -= 1
-            if (remainingSeconds <= 5 && remainingSeconds > 0) {
+            if (!isQuickBattle && remainingSeconds <= 10 && remainingSeconds > 0) {
                 audioHaptic.playCountdownSound(userSettings.soundEffects)
             }
-        } else if (!isQuickBattle && !isPracticeMode && !isEndlessMode && !isPaused && remainingSeconds <= 0 && !isProcessingAnswer) {
+        } else if (!isPracticeMode && !isEndlessMode && !isPaused && remainingSeconds <= 0 && !isProcessingAnswer) {
             finishGameSession()
         }
     }
@@ -393,8 +400,6 @@ fun GameScreen(
                                     )
                                 }
                             }
-                        } else if (isQuickBattle) {
-                            TimerView(remainingSeconds = questionTimerSeconds, totalSeconds = questionTimerTotal)
                         } else {
                             TimerView(remainingSeconds = remainingSeconds, totalSeconds = totalGameTime)
                         }
@@ -460,6 +465,78 @@ fun GameScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+                }
+
+                // Prominent Match Round Timer Bar (120s full round duration)
+                if (!isPracticeMode && !isEndlessMode && totalGameTime > 0) {
+                    val roundProgress by animateFloatAsState(
+                        targetValue = (remainingSeconds.toFloat() / totalGameTime.toFloat()).coerceIn(0f, 1f),
+                        animationSpec = tween(durationMillis = 500, easing = LinearEasing),
+                        label = "RoundProgressBar"
+                    )
+                    val barColor = when {
+                        remainingSeconds <= 20 -> NeonRed
+                        remainingSeconds <= 45 -> NeonAmber
+                        else -> NeonCyan
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Timer,
+                                    contentDescription = "Match Clock",
+                                    tint = barColor,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "MATCH ROUND CLOCK",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = barColor,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp,
+                                    fontSize = 11.sp
+                                )
+                                if (remainingSeconds <= 20) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "⚡ FINAL SECONDS",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NeonRed,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "${remainingSeconds}s / ${totalGameTime}s",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { roundProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = barColor,
+                            trackColor = CardSurfaceBorder,
+                            strokeCap = StrokeCap.Round
+                        )
                     }
                 }
             }
@@ -691,6 +768,9 @@ fun GameScreen(
                                 if (isProcessingAnswer || isPaused || isEliminated) return@AnswerButton
                                 isProcessingAnswer = true
                                 selectedAnswerIndex = index
+
+                                // Record answered question immediately to ensure strict no-repeat history
+                                repository.recordQuestionAnswered(currentQuestion.id, currentQuestion.categoryId)
 
                                 val isCorrect = optionText == currentQuestion.correctAnswer
                                 isAnswerCorrect = isCorrect

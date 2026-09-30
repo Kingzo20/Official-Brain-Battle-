@@ -5,7 +5,7 @@ import com.example.model.Question
 
 object QuestionBank {
 
-    val mathQuestions: List<Question> = listOf(
+    val _baseMathQuestions: List<Question> = listOf(
         Question(
             id = "math_01",
             categoryId = "math",
@@ -451,7 +451,7 @@ object QuestionBank {
         )
     )
 
-    val logicQuestions: List<Question> = listOf(
+    val _baseLogicQuestions: List<Question> = listOf(
         Question(
             id = "logic_01",
             categoryId = "logic",
@@ -674,7 +674,7 @@ object QuestionBank {
         )
     )
 
-    val wordsQuestions: List<Question> = listOf(
+    val _baseWordsQuestions: List<Question> = listOf(
         Question(
             id = "words_01",
             categoryId = "words",
@@ -897,7 +897,7 @@ object QuestionBank {
         )
     )
 
-    val knowledgeQuestions: List<Question> = listOf(
+    val _baseKnowledgeQuestions: List<Question> = listOf(
         Question(
             id = "gk_01",
             categoryId = "knowledge",
@@ -1120,7 +1120,7 @@ object QuestionBank {
         )
     )
 
-    val scienceQuestions: List<Question> = listOf(
+    val _baseScienceQuestions: List<Question> = listOf(
         Question(
             id = "sci_01",
             categoryId = "science",
@@ -1343,7 +1343,7 @@ object QuestionBank {
         )
     )
 
-    val patternQuestions: List<Question> = listOf(
+    val _basePatternQuestions: List<Question> = listOf(
         Question(
             id = "pat_01",
             categoryId = "patterns",
@@ -1789,10 +1789,17 @@ object QuestionBank {
         )
     )
 
-    val geographyQuestions: List<Question> get() = DedicatedCategoryQuestionPools.geographyQuestions
-    val memoryQuestions: List<Question> get() = DedicatedCategoryQuestionPools.memoryQuestions
-    val riddleQuestions: List<Question> get() = DedicatedCategoryQuestionPools.riddleQuestions
-    val technologyQuestions: List<Question> get() = DedicatedCategoryQuestionPools.technologyQuestions
+    val geographyQuestions: List<Question> get() = DedicatedCategoryQuestionPools.geographyQuestions + ExpandedCategoryQuestionPools.geographyQuestions
+    val memoryQuestions: List<Question> get() = DedicatedCategoryQuestionPools.memoryQuestions + ExpandedCategoryQuestionPools.memoryQuestions
+    val riddleQuestions: List<Question> get() = DedicatedCategoryQuestionPools.riddleQuestions + ExpandedCategoryQuestionPools.riddleQuestions
+    val technologyQuestions: List<Question> get() = DedicatedCategoryQuestionPools.technologyQuestions + ExpandedCategoryQuestionPools.technologyQuestions
+
+    val mathQuestions: List<Question> by lazy { _baseMathQuestions + ExpandedCategoryQuestionPools.mathQuestions }
+    val logicQuestions: List<Question> by lazy { _baseLogicQuestions + ExpandedCategoryQuestionPools.logicQuestions }
+    val wordsQuestions: List<Question> by lazy { _baseWordsQuestions + ExpandedCategoryQuestionPools.wordsQuestions }
+    val knowledgeQuestions: List<Question> by lazy { _baseKnowledgeQuestions + ExpandedCategoryQuestionPools.knowledgeQuestions }
+    val scienceQuestions: List<Question> by lazy { _baseScienceQuestions + ExpandedCategoryQuestionPools.scienceQuestions }
+    val patternQuestions: List<Question> by lazy { _basePatternQuestions + ExpandedCategoryQuestionPools.patternQuestions }
 
     val allQuestions: List<Question> by lazy {
         mathQuestions + numbersQuestions + logicQuestions + wordsQuestions +

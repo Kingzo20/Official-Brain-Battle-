@@ -50,6 +50,7 @@ class GameRepository(context: Context? = null) {
     val personalBestService = PersonalBestService(appContext)
     val titleManager = TitleManager()
     val leaderboardService = LeaderboardService(appContext ?: context, firestoreRepo, antiCheatService)
+    val questionHistoryTracker: QuestionHistoryTracker? = (appContext ?: context)?.let { QuestionHistoryTracker(it) }
 
     val socialRepository: SocialRepository = SocialRepository(
         context = appContext ?: context,
@@ -282,8 +283,13 @@ class GameRepository(context: Context? = null) {
         timeSpentSeconds: Int,
         categoryTitle: String,
         gameMode: String = "category",
-        bestStreak: Int = 0
+        bestStreak: Int = 0,
+        answeredQuestionIds: List<String> = emptyList(),
+        categoryId: String = ""
     ): GameResult {
+        if (answeredQuestionIds.isNotEmpty()) {
+            recordQuestionHistory(answeredQuestionIds, categoryId.ifBlank { categoryTitle.lowercase() })
+        }
         val gameId = "game_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
 
         // Anti-cheat & plausibility evaluation
@@ -599,35 +605,49 @@ class GameRepository(context: Context? = null) {
         }
     }
 
-    fun getQuestionsFor(category: GameCategory, difficulty: Difficulty): List<Question> {
-        return QuestionSelectionService.getQuestionsForCategory(
+    fun getQuestionsFor(
+        category: GameCategory,
+        difficulty: Difficulty? = null,
+        count: Int = 10,
+        playerLevel: Int = _userProfile.value.level
+    ): List<Question> {
+        val uid = _userProfile.value.uid.ifBlank { _userProfile.value.playerId.ifBlank { "local_player" } }
+        val answeredIds = questionHistoryTracker?.getAnsweredQuestionIds(uid, category.id) ?: emptySet()
+        val result = QuestionSelectionService.getQuestionsForCategoryWithHistory(
             category = category,
             difficulty = difficulty,
-            count = 10,
+            playerLevel = playerLevel,
+            count = count,
+            excludeIds = answeredIds,
             pool = questionAdminService.getAllApprovedPool()
         )
+        if (result.wasExhaustedAndRecycled) {
+            questionHistoryTracker?.resetCategoryHistory(category.id, uid)
+        }
+        return result.questions
     }
 
-    fun getPracticeQuestions(category: GameCategory, difficulty: Difficulty, count: Int = 5): List<Question> {
-        return QuestionSelectionService.getPracticeQuestions(
-            category = category,
-            difficulty = difficulty,
-            count = count,
-            pool = questionAdminService.getAllApprovedPool()
-        )
+    fun getPracticeQuestions(
+        category: GameCategory,
+        difficulty: Difficulty? = null,
+        count: Int = 10,
+        playerLevel: Int = _userProfile.value.level
+    ): List<Question> {
+        return getQuestionsFor(category, difficulty, count, playerLevel)
     }
 
     fun getDailyQuestions(): List<Question> {
         return QuestionSelectionService.getDailyChallengeQuestions()
     }
 
-    fun getQuickBattleQuestions(category: GameCategory? = null, difficulty: Difficulty? = null): List<Question> {
-        return QuestionSelectionService.getQuickBattleQuestions(
-            category = category,
-            difficulty = difficulty,
-            count = 10,
-            pool = questionAdminService.getAllApprovedPool()
-        )
+    fun getQuickBattleQuestions(
+        category: GameCategory? = null,
+        difficulty: Difficulty? = null,
+        count: Int = 10,
+        playerLevel: Int = _userProfile.value.level
+    ): List<Question> {
+        val targetCategory = category ?: GameCategory.ALL_10_CATEGORIES.random()
+        return getQuestionsFor(targetCategory, difficulty, count, playerLevel)
     }
 
     fun getRushQuestions(): List<Question> {
@@ -636,6 +656,16 @@ class GameRepository(context: Context? = null) {
 
     fun getEndlessQuestions(): List<Question> {
         return QuestionSelectionService.getEndlessPool(40, questionAdminService.getAllApprovedPool())
+    }
+
+    fun recordQuestionAnswered(questionId: String, categoryId: String) {
+        val uid = _userProfile.value.uid.ifBlank { _userProfile.value.playerId.ifBlank { "local_player" } }
+        questionHistoryTracker?.markQuestionAnswered(questionId, categoryId, uid)
+    }
+
+    fun recordQuestionHistory(questionIds: Collection<String>, categoryId: String) {
+        val uid = _userProfile.value.uid.ifBlank { _userProfile.value.playerId.ifBlank { "local_player" } }
+        questionHistoryTracker?.markQuestionsAnswered(questionIds, categoryId, uid)
     }
 
     fun reportQuestion(report: QuestionReport) {
