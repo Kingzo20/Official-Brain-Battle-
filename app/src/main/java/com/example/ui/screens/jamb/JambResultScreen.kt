@@ -5,13 +5,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -21,20 +23,50 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.jamb.JambBenchmarkData
 import com.example.model.jamb.JambExamResult
+import com.example.model.jamb.JambMultiSubjectExamResult
+import com.example.model.jamb.UniversityDepartmentCutOff
 import com.example.ui.theme.*
 
 private val JambGreenLight = Color(0xFF00C853)
 private val JambFlagAmber = Color(0xFFFF9100)
+private val JambGold = Color(0xFFFFB300)
 
 @Composable
 fun JambResultScreen(
-    result: JambExamResult,
+    singleResult: JambExamResult? = null,
+    multiResult: JambMultiSubjectExamResult? = null,
     onReviewAnswers: () -> Unit,
     onRetakeExam: () -> Unit,
     onBackToHome: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isMulti = multiResult != null
+
+    val aggregateScore = if (isMulti) {
+        multiResult!!.aggregateScoreOutOf400
+    } else {
+        // Project single subject out of 400
+        ((singleResult?.scaledScore ?: 0) * 4).coerceIn(0, 400)
+    }
+
+    val totalCorrect = if (isMulti) multiResult!!.totalCorrect else (singleResult?.correctCount ?: 0)
+    val totalQuestions = if (isMulti) multiResult!!.totalQuestions else (singleResult?.totalQuestions ?: 0)
+    val totalTimeSeconds = if (isMulti) multiResult!!.totalTimeSpentSeconds else (singleResult?.totalTimeSpentSeconds ?: 0)
+
+    val performanceTier = if (isMulti) {
+        multiResult!!.performanceTier
+    } else {
+        singleResult?.performanceTier ?: "UTME DRILL COMPLETED"
+    }
+
+    val gradeColor = when {
+        aggregateScore >= 280 -> Color(0xFF00E676)
+        aggregateScore >= 220 -> Color(0xFFFFB300)
+        else -> Color(0xFFFF4365)
+    }
+
     Scaffold(
         containerColor = BackgroundDark,
         modifier = modifier.testTag("jamb_result_screen")
@@ -52,7 +84,7 @@ fun JambResultScreen(
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = CardSurface,
-                    border = BorderStroke(2.dp, Color(result.gradeColorHex)),
+                    border = BorderStroke(2.dp, gradeColor),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("jamb_result_score_card")
@@ -62,7 +94,7 @@ fun JambResultScreen(
                             .background(
                                 Brush.verticalGradient(
                                     listOf(
-                                        Color(result.gradeColorHex).copy(alpha = 0.15f),
+                                        gradeColor.copy(alpha = 0.15f),
                                         CardSurface
                                     )
                                 )
@@ -74,7 +106,7 @@ fun JambResultScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            // Subject Code Badge
+                            // Subject Tag Badge
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = CardSurfaceElevated,
@@ -85,9 +117,16 @@ fun JambResultScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Text(text = result.subject.iconEmoji, fontSize = 16.sp)
                                     Text(
-                                        text = "${result.subject.title.uppercase()} • ${result.examType.title.uppercase()}",
+                                        text = if (isMulti) "🏆" else (singleResult?.subject?.iconEmoji ?: "📖"),
+                                        fontSize = 16.sp
+                                    )
+                                    Text(
+                                        text = if (isMulti) {
+                                            "FULL 4-SUBJECT UTME MOCK (180 QS)"
+                                        } else {
+                                            "${singleResult?.subject?.title?.uppercase()} • ${singleResult?.examType?.title?.uppercase()}"
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = TextSecondary
@@ -98,14 +137,14 @@ fun JambResultScreen(
                             // Big Scaled Score
                             Row(verticalAlignment = Alignment.Bottom) {
                                 Text(
-                                    text = "${result.scaledScore}",
+                                    text = if (isMulti) "$aggregateScore" else "${singleResult?.scaledScore ?: 0}",
                                     style = MaterialTheme.typography.displayLarge,
                                     fontWeight = FontWeight.Black,
-                                    color = Color(result.gradeColorHex),
+                                    color = gradeColor,
                                     fontSize = 64.sp
                                 )
                                 Text(
-                                    text = " / 100",
+                                    text = if (isMulti) " / 400" else " / 100",
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                     color = TextMuted,
@@ -113,25 +152,28 @@ fun JambResultScreen(
                                 )
                             }
 
-                            // Percentage & Equivalent
+                            // Percentage & Performance Tier
                             Text(
-                                text = "Scaled UTME Score: ${result.percentageScore.toInt()}% (${result.correctCount} of ${result.totalQuestions} Correct)",
+                                text = if (isMulti) {
+                                    "Total Aggregate: $aggregateScore / 400 ($totalCorrect of $totalQuestions Correct)"
+                                } else {
+                                    "Scaled Score: ${singleResult?.percentageScore?.toInt()}% ($totalCorrect of $totalQuestions Correct)"
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextPrimary,
                                 fontWeight = FontWeight.SemiBold
                             )
 
-                            // Performance Tier Pill
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = Color(result.gradeColorHex).copy(alpha = 0.2f),
-                                border = BorderStroke(1.dp, Color(result.gradeColorHex))
+                                color = gradeColor.copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, gradeColor)
                             ) {
                                 Text(
-                                    text = result.performanceTier,
+                                    text = performanceTier,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Black,
-                                    color = Color(result.gradeColorHex),
+                                    color = gradeColor,
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                                 )
                             }
@@ -140,7 +182,73 @@ fun JambResultScreen(
                 }
             }
 
-            // Metric Breakdown Grid
+            // If 4-Subject Mock: Show individual paper cards
+            if (isMulti && multiResult != null) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "4-SUBJECT BREAKDOWN (SCALED TO 100 EACH)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            color = TextPrimary,
+                            letterSpacing = 1.sp
+                        )
+
+                        multiResult.subjectResults.forEach { (subj, subResult) ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = CardSurface,
+                                border = BorderStroke(1.dp, CardSurfaceBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(14.dp)
+                                        .fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text(text = subj.iconEmoji, fontSize = 24.sp)
+                                        Column {
+                                            Text(
+                                                text = subj.title,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimary
+                                            )
+                                            Text(
+                                                text = "${subResult.correctCount}/${subResult.totalQuestions} Correct • ${subResult.unansweredCount} Omitted",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                    }
+
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "${subResult.scaledScore}",
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color(subResult.gradeColorHex)
+                                        )
+                                        Text(
+                                            text = "/ 100",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = TextMuted
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // General Metrics Breakdown
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
@@ -151,52 +259,43 @@ fun JambResultScreen(
                         letterSpacing = 1.sp
                     )
 
+                    val correctCnt = if (isMulti) multiResult!!.totalCorrect else (singleResult?.correctCount ?: 0)
+                    val wrongCnt = if (isMulti) multiResult!!.totalIncorrect else (singleResult?.incorrectCount ?: 0)
+                    val omittedCnt = if (isMulti) multiResult!!.totalUnanswered else (singleResult?.unansweredCount ?: 0)
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         MetricCard(
                             label = "Correct",
-                            value = "${result.correctCount}",
+                            value = "$correctCnt",
                             icon = Icons.Default.CheckCircle,
                             color = JambGreenLight,
                             modifier = Modifier.weight(1f)
                         )
                         MetricCard(
-                            label = "Incorrect",
-                            value = "${result.incorrectCount}",
+                            label = "Wrong",
+                            value = "$wrongCnt",
                             icon = Icons.Default.Cancel,
                             color = NeonRed,
                             modifier = Modifier.weight(1f)
                         )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
                         MetricCard(
-                            label = "Unanswered",
-                            value = "${result.unansweredCount}",
+                            label = "Omitted",
+                            value = "$omittedCnt",
                             icon = Icons.Default.HelpOutline,
                             color = TextMuted,
                             modifier = Modifier.weight(1f)
                         )
-                        MetricCard(
-                            label = "Flagged",
-                            value = "${result.flaggedQuestionIndices.size}",
-                            icon = Icons.Default.Flag,
-                            color = JambFlagAmber,
-                            modifier = Modifier.weight(1f)
-                        )
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        val mins = result.totalTimeSpentSeconds / 60
-                        val secs = result.totalTimeSpentSeconds % 60
+                        val mins = totalTimeSeconds / 60
+                        val secs = totalTimeSeconds % 60
                         MetricCard(
                             label = "Total Time",
                             value = String.format("%02d:%02d", mins, secs),
@@ -204,9 +303,10 @@ fun JambResultScreen(
                             color = NeonCyan,
                             modifier = Modifier.weight(1f)
                         )
+                        val avgSec = if (totalQuestions > 0) totalTimeSeconds / totalQuestions else 0
                         MetricCard(
                             label = "Avg / Question",
-                            value = "${result.averageTimePerQuestionSeconds.toInt()}s",
+                            value = "${avgSec}s",
                             icon = Icons.Default.Speed,
                             color = NeonGold,
                             modifier = Modifier.weight(1f)
@@ -215,51 +315,119 @@ fun JambResultScreen(
                 }
             }
 
-            // UTME Recommendation & Feedback
+            // UTME Departmental Cut-off Predictor & Benchmark
             item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = CardSurfaceElevated,
-                    border = BorderStroke(1.dp, CardSurfaceBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Psychology,
-                                contentDescription = null,
-                                tint = NeonCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "ADMISSION INSIGHT",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = NeonCyan
-                            )
-                        }
-
-                        val feedbackText = when {
-                            result.percentageScore >= 80f ->
-                                "Outstanding mastery! A score of ${result.scaledScore}/100 puts you in the top percentile of UTME candidates for competitive programs (Medicine, Law, Engineering, Computer Science)."
-                            result.percentageScore >= 65f ->
-                                "Solid performance! You are on track for a high UTME aggregate. Review missed questions to tighten speed and eliminate careless errors."
-                            result.percentageScore >= 50f ->
-                                "Passing credit achieved. Targeted revision of high-yield topics is recommended to push your aggregate above 70%."
-                            else ->
-                                "Needs consistent drills. Tap 'Review Answers' below to study detailed explanations for every question and learn the core principles."
-                        }
-
                         Text(
-                            text = feedbackText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                            lineHeight = 20.sp
+                            text = "DEPARTMENTAL ADMISSION PREDICTOR",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            color = TextPrimary,
+                            letterSpacing = 1.sp
                         )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = JambGold.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, JambGold)
+                        ) {
+                            Text(
+                                text = "NIGERIAN CUT-OFFS",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = JambGold,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    // Cutoff Cards
+                    val cutoffs = JambBenchmarkData.OFFICIAL_CUTOFFS
+                    cutoffs.forEach { cutoff ->
+                        val isQualified = aggregateScore >= cutoff.minimumScore
+                        val isHighlyCompetitive = aggregateScore >= cutoff.competitiveScore
+
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isQualified) CardSurface else CardSurfaceElevated,
+                            border = BorderStroke(
+                                width = if (isHighlyCompetitive) 1.5.dp else 1.dp,
+                                color = if (isHighlyCompetitive) JambGreenLight else if (isQualified) NeonCyan else CardSurfaceBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(text = cutoff.iconEmoji, fontSize = 20.sp)
+                                        Column {
+                                            Text(
+                                                text = cutoff.courseName,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimary
+                                            )
+                                            Text(
+                                                text = "${cutoff.faculty} • Min Cut-off: ${cutoff.minimumScore} | Safe: ${cutoff.competitiveScore}+",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = when {
+                                            isHighlyCompetitive -> JambGreenLight.copy(alpha = 0.2f)
+                                            isQualified -> NeonCyan.copy(alpha = 0.2f)
+                                            else -> NeonRed.copy(alpha = 0.2f)
+                                        },
+                                        border = BorderStroke(
+                                            1.dp,
+                                            when {
+                                                isHighlyCompetitive -> JambGreenLight
+                                                isQualified -> NeonCyan
+                                                else -> NeonRed
+                                            }
+                                        )
+                                    ) {
+                                        Text(
+                                            text = when {
+                                                isHighlyCompetitive -> "HIGH CHANCE ✓"
+                                                isQualified -> "ELIGIBLE"
+                                                else -> "NEED +${cutoff.minimumScore - aggregateScore} PTS"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = when {
+                                                isHighlyCompetitive -> JambGreenLight
+                                                isQualified -> NeonCyan
+                                                else -> NeonRed
+                                            },
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    text = cutoff.recommendation,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextMuted,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -291,7 +459,7 @@ fun JambResultScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "REVIEW ANSWERS & EXPLANATIONS",
+                                text = "EXPLAIN STEP-BY-STEP & REVIEW",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Black,
                                 color = Color.Black
@@ -319,7 +487,7 @@ fun JambResultScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "START NEW CBT DRILL",
+                            text = "START NEW CBT DRILL / MOCK",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
@@ -363,7 +531,7 @@ private fun MetricCard(
         Row(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Box(
                 contentAlignment = Alignment.Center,

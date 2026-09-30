@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.data.QuestionHistoryTracker
 import com.example.model.jamb.JambExamResult
 import com.example.model.jamb.JambExamType
+import com.example.model.jamb.JambMultiSubjectExamResult
 import com.example.model.jamb.JambQuestion
 import com.example.model.jamb.JambSubject
 import java.util.UUID
@@ -16,10 +17,9 @@ class JambQuestionRepository(
 
     fun getQuestions(
         subject: JambSubject,
-        examType: JambExamType,
+        count: Int,
         uid: String = ""
     ): List<JambQuestion> {
-        val count = examType.questionCount
         val fullSubjectPool = getPoolForSubject(subject)
 
         val subjectKey = "jamb_${subject.id}"
@@ -47,6 +47,30 @@ class JambQuestionRepository(
             cycle++
         }
         return result.mapIndexed { idx, q -> q.copy(questionNumber = idx + 1) }
+    }
+
+    fun getQuestions(
+        subject: JambSubject,
+        examType: JambExamType,
+        uid: String = ""
+    ): List<JambQuestion> {
+        return getQuestions(subject, examType.questionCount, uid)
+    }
+
+    fun getMultiSubjectQuestions(
+        electives: List<JambSubject>,
+        uid: String = ""
+    ): Map<JambSubject, List<JambQuestion>> {
+        val map = linkedMapOf<JambSubject, List<JambQuestion>>()
+        // Compulsory English: 60 Questions
+        map[JambSubject.ENGLISH] = getQuestions(JambSubject.ENGLISH, count = 60, uid = uid)
+        // 3 Electives: 40 Questions each
+        electives.distinct().take(3).forEach { elective ->
+            if (elective != JambSubject.ENGLISH) {
+                map[elective] = getQuestions(elective, count = 40, uid = uid)
+            }
+        }
+        return map
     }
 
     fun recordExamQuestionsAnswered(
@@ -113,6 +137,36 @@ class JambQuestionRepository(
         )
     }
 
+    fun calculateMultiSubjectResult(
+        subjectQuestions: Map<JambSubject, List<JambQuestion>>,
+        userAnswersBySubject: Map<JambSubject, Map<Int, String>>,
+        flaggedBySubject: Map<JambSubject, Set<Int>>,
+        totalTimeSpentSeconds: Int
+    ): JambMultiSubjectExamResult {
+        val subjectResults = linkedMapOf<JambSubject, JambExamResult>()
+
+        subjectQuestions.forEach { (subj, qList) ->
+            val answers = userAnswersBySubject[subj] ?: emptyMap()
+            val flags = flaggedBySubject[subj] ?: emptySet()
+            val paperExamType = if (subj == JambSubject.ENGLISH) JambExamType.FULL_SIMULATION else JambExamType.STANDARD_TEST
+            val singleRes = calculateResult(
+                subject = subj,
+                examType = paperExamType,
+                questions = qList,
+                userAnswers = answers,
+                timeSpentSeconds = (totalTimeSpentSeconds / subjectQuestions.size.coerceAtLeast(1)),
+                flaggedIndices = flags
+            )
+            subjectResults[subj] = singleRes
+        }
+
+        return JambMultiSubjectExamResult(
+            resultId = "jamb_multi_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}",
+            subjectResults = subjectResults,
+            totalTimeSpentSeconds = totalTimeSpentSeconds
+        )
+    }
+
     fun getPoolForSubject(subject: JambSubject): List<JambQuestion> {
         return when (subject) {
             JambSubject.ENGLISH -> JambPastQuestionsBank.englishQuestions
@@ -123,6 +177,7 @@ class JambQuestionRepository(
             JambSubject.ECONOMICS -> JambPastQuestionsBank.economicsQuestions
             JambSubject.GOVERNMENT -> JambPastQuestionsBank.governmentQuestions
             JambSubject.LITERATURE -> JambPastQuestionsBank.literatureQuestions
+            JambSubject.CRK_IRS -> JambPastQuestionsBank.crkQuestions
         }
     }
 }

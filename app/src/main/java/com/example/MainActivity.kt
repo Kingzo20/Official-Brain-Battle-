@@ -56,7 +56,12 @@ class MainActivity : ComponentActivity() {
                 var showDailyAlreadyCompletedDialog by remember { mutableStateOf(false) }
                 var activeJambSubject by remember { mutableStateOf(JambSubject.ENGLISH) }
                 var activeJambExamType by remember { mutableStateOf(JambExamType.STANDARD_TEST) }
-                var currentJambResult by remember { mutableStateOf<JambExamResult?>(null) }
+                var activeJambElectives by remember {
+                    mutableStateOf(listOf(JambSubject.MATHEMATICS, JambSubject.PHYSICS, JambSubject.CHEMISTRY))
+                }
+                var activeEnable8Keypad by remember { mutableStateOf(true) }
+                var currentSingleJambResult by remember { mutableStateOf<JambExamResult?>(null) }
+                var currentMultiJambResult by remember { mutableStateOf<JambMultiSubjectExamResult?>(null) }
 
                 val userProfile by repository.userProfile.collectAsState()
                 LaunchedEffect(userProfile.isPremium) {
@@ -500,9 +505,11 @@ class MainActivity : ComponentActivity() {
                                 JambSetupScreen(
                                     initialSubject = activeJambSubject,
                                     initialExamType = activeJambExamType,
-                                    onStartExam = { subject, examType ->
+                                    onStartExam = { subject, examType, electives, enable8Keypad ->
                                         activeJambSubject = subject
                                         activeJambExamType = examType
+                                        activeJambElectives = electives
+                                        activeEnable8Keypad = enable8Keypad
                                         currentScreen = Screen.JambExam
                                     },
                                     onBack = {
@@ -514,10 +521,18 @@ class MainActivity : ComponentActivity() {
                                 JambExamScreen(
                                     subject = activeJambSubject,
                                     examType = activeJambExamType,
+                                    electives = activeJambElectives,
+                                    initialEnable8Keypad = activeEnable8Keypad,
                                     jambRepository = repository.jambRepo,
                                     currentUserId = userProfile.uid,
-                                    onExamFinished = { examResult ->
-                                        currentJambResult = examResult
+                                    onSingleExamFinished = { singleRes ->
+                                        currentSingleJambResult = singleRes
+                                        currentMultiJambResult = null
+                                        currentScreen = Screen.JambResult
+                                    },
+                                    onMultiExamFinished = { multiRes ->
+                                        currentMultiJambResult = multiRes
+                                        currentSingleJambResult = null
                                         currentScreen = Screen.JambResult
                                     },
                                     onExitExam = {
@@ -526,9 +541,10 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                             Screen.JambResult -> {
-                                currentJambResult?.let { res ->
+                                if (currentMultiJambResult != null || currentSingleJambResult != null) {
                                     JambResultScreen(
-                                        result = res,
+                                        singleResult = currentSingleJambResult,
+                                        multiResult = currentMultiJambResult,
                                         onReviewAnswers = {
                                             currentScreen = Screen.JambReview
                                         },
@@ -539,19 +555,20 @@ class MainActivity : ComponentActivity() {
                                             currentScreen = Screen.Home
                                         }
                                     )
-                                } ?: run {
+                                } else {
                                     currentScreen = Screen.Home
                                 }
                             }
                             Screen.JambReview -> {
-                                currentJambResult?.let { res ->
+                                if (currentMultiJambResult != null || currentSingleJambResult != null) {
                                     JambReviewScreen(
-                                        result = res,
+                                        singleResult = currentSingleJambResult,
+                                        multiResult = currentMultiJambResult,
                                         onBack = {
                                             currentScreen = Screen.JambResult
                                         }
                                     )
-                                } ?: run {
+                                } else {
                                     currentScreen = Screen.Home
                                 }
                             }
