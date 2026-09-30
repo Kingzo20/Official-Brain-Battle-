@@ -38,6 +38,10 @@ sealed class Screen(val route: String) {
     object Statistics : Screen("statistics")
     object Social : Screen("social")
     data class MatchResult(val challengeId: String) : Screen("match_result")
+    object JambSetup : Screen("jamb_setup")
+    object JambExam : Screen("jamb_exam")
+    object JambResult : Screen("jamb_result")
+    object JambReview : Screen("jamb_review")
 }
 
 enum class BottomNavTab(

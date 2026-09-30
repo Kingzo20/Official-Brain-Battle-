@@ -42,6 +42,7 @@ fun HomeScreen(
     onViewAllAchievements: () -> Unit,
     onNavigateToStatistics: () -> Unit = {},
     onStartPractice: (GameCategory, Difficulty) -> Unit = { _, _ -> },
+    onLaunchJambCbt: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val userProfile by repository.userProfile.collectAsState()
@@ -171,6 +172,144 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 testTag = "home_play_daily_button"
                             )
+                        }
+                    }
+                }
+            }
+
+            // Prominent JAMB CBT Exam Mode Card
+            item {
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = CardSurface,
+                    border = BorderStroke(1.5.dp, Color(0xFF00C853).copy(alpha = 0.8f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home_jamb_cbt_card")
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        CardSurface,
+                                        Color(0xFF008751).copy(alpha = 0.16f),
+                                        CardSurfaceElevated
+                                    )
+                                )
+                            )
+                            .padding(20.dp)
+                    ) {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF008751).copy(alpha = 0.25f),
+                                    border = BorderStroke(1.dp, Color(0xFF00C853))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(text = "🇳🇬", fontSize = 14.sp)
+                                        Text(
+                                            text = "JAMB UTME CBT SIMULATOR",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF00C853),
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.weight(1f))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = NeonAmber.copy(alpha = 0.2f),
+                                    border = BorderStroke(1.dp, NeonAmber)
+                                ) {
+                                    Text(
+                                        text = "PAST QUESTIONS",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NeonAmber,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Text(
+                                text = "Authentic CBT Exam Engine",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Black
+                            )
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = "8 UTME Subjects • Authentic Question Palette • Real-time Countdown Timer • In-Depth Explanations",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                lineHeight = 18.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text("Subjects", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                                    Text("8 Papers", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
+                                }
+                                Column {
+                                    Text("Exam Modes", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                                    Text("Drill / Standard / Full", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
+                                }
+                                Column {
+                                    Text("No-Repeat", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                                    Text("Active ✓", style = MaterialTheme.typography.titleMedium, color = Color(0xFF00C853), fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Button(
+                                onClick = onLaunchJambCbt,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("home_launch_jamb_button"),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF00C853)
+                                )
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.School,
+                                        contentDescription = null,
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "LAUNCH JAMB CBT EXAM MODE",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.Black
+                                    )
+                                }
+                            }
                         }
                     }
                 }

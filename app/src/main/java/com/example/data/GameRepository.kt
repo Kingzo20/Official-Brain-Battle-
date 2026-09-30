@@ -51,6 +51,7 @@ class GameRepository(context: Context? = null) {
     val titleManager = TitleManager()
     val leaderboardService = LeaderboardService(appContext ?: context, firestoreRepo, antiCheatService)
     val questionHistoryTracker: QuestionHistoryTracker? = (appContext ?: context)?.let { QuestionHistoryTracker(it) }
+    val jambRepo: com.example.data.jamb.JambQuestionRepository = com.example.data.jamb.JambQuestionRepository(appContext ?: context, questionHistoryTracker)
 
     val socialRepository: SocialRepository = SocialRepository(
         context = appContext ?: context,

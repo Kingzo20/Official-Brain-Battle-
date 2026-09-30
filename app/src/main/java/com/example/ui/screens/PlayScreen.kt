@@ -28,6 +28,7 @@ import com.example.ui.theme.*
 @Composable
 fun PlayScreen(
     onModeSelected: (GameModeType) -> Unit,
+    onLaunchJambCbt: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val modes = GameModeType.values()
@@ -58,6 +59,80 @@ fun PlayScreen(
                     color = TextSecondary
                 )
                 Spacer(modifier = Modifier.height(4.dp))
+            }
+
+            // Featured JAMB CBT Simulator Mode
+            item {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = CardSurface,
+                    border = BorderStroke(1.5.dp, Color(0xFF00C853)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onLaunchJambCbt() }
+                        .testTag("play_jamb_cbt_mode_card")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        CardSurface,
+                                        Color(0xFF008751).copy(alpha = 0.20f)
+                                    )
+                                )
+                            )
+                            .padding(18.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(CardSurfaceElevated)
+                                    .border(1.dp, Color(0xFF00C853), RoundedCornerShape(14.dp))
+                            ) {
+                                Text(text = "🇳🇬", fontSize = 28.sp)
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "JAMB CBT SIMULATOR",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = TextPrimary
+                                    )
+                                }
+                                Text(
+                                    text = "Authentic UTME past questions with CBT question palette & explanations",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF00C853).copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, Color(0xFF00C853))
+                            ) {
+                                Text(
+                                    text = "UTME",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF00C853),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             items(modes) { mode ->

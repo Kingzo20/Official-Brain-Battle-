@@ -23,10 +23,12 @@ import com.example.model.Difficulty
 import com.example.model.GameCategory
 import com.example.model.GameModeType
 import com.example.model.GameResult
+import com.example.model.jamb.*
 import com.example.ui.components.PrimaryButton
 import com.example.ui.navigation.BrainBattleBottomBar
 import com.example.ui.navigation.Screen
 import com.example.ui.screens.*
+import com.example.ui.screens.jamb.*
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -52,6 +54,9 @@ class MainActivity : ComponentActivity() {
                 var currentResult by remember { mutableStateOf<GameResult?>(null) }
                 var activeChallengeRecord by remember { mutableStateOf<FriendChallengeRecord?>(null) }
                 var showDailyAlreadyCompletedDialog by remember { mutableStateOf(false) }
+                var activeJambSubject by remember { mutableStateOf(JambSubject.ENGLISH) }
+                var activeJambExamType by remember { mutableStateOf(JambExamType.STANDARD_TEST) }
+                var currentJambResult by remember { mutableStateOf<JambExamResult?>(null) }
 
                 val userProfile by repository.userProfile.collectAsState()
                 LaunchedEffect(userProfile.isPremium) {
@@ -119,6 +124,18 @@ class MainActivity : ComponentActivity() {
                         }
                         Screen.Statistics -> {
                             currentScreen = Screen.Home
+                        }
+                        Screen.JambSetup -> {
+                            currentScreen = Screen.Home
+                        }
+                        Screen.JambExam -> {
+                            currentScreen = Screen.JambSetup
+                        }
+                        Screen.JambResult -> {
+                            currentScreen = Screen.Home
+                        }
+                        Screen.JambReview -> {
+                            currentScreen = Screen.JambResult
                         }
                         else -> {
                             currentScreen = Screen.Home
@@ -211,6 +228,9 @@ class MainActivity : ComponentActivity() {
                                         activeCategory = cat
                                         activeDifficulty = diff
                                         currentScreen = Screen.Game
+                                    },
+                                    onLaunchJambCbt = {
+                                        currentScreen = Screen.JambSetup
                                     }
                                 )
                             }
@@ -251,6 +271,9 @@ class MainActivity : ComponentActivity() {
                                                 currentScreen = Screen.Tournament
                                             }
                                         }
+                                    },
+                                    onLaunchJambCbt = {
+                                        currentScreen = Screen.JambSetup
                                     }
                                 )
                             }
@@ -472,6 +495,65 @@ class MainActivity : ComponentActivity() {
                                         currentScreen = Screen.Home
                                     }
                                 )
+                            }
+                            Screen.JambSetup -> {
+                                JambSetupScreen(
+                                    initialSubject = activeJambSubject,
+                                    initialExamType = activeJambExamType,
+                                    onStartExam = { subject, examType ->
+                                        activeJambSubject = subject
+                                        activeJambExamType = examType
+                                        currentScreen = Screen.JambExam
+                                    },
+                                    onBack = {
+                                        currentScreen = Screen.Home
+                                    }
+                                )
+                            }
+                            Screen.JambExam -> {
+                                JambExamScreen(
+                                    subject = activeJambSubject,
+                                    examType = activeJambExamType,
+                                    jambRepository = repository.jambRepo,
+                                    currentUserId = userProfile.uid,
+                                    onExamFinished = { examResult ->
+                                        currentJambResult = examResult
+                                        currentScreen = Screen.JambResult
+                                    },
+                                    onExitExam = {
+                                        currentScreen = Screen.JambSetup
+                                    }
+                                )
+                            }
+                            Screen.JambResult -> {
+                                currentJambResult?.let { res ->
+                                    JambResultScreen(
+                                        result = res,
+                                        onReviewAnswers = {
+                                            currentScreen = Screen.JambReview
+                                        },
+                                        onRetakeExam = {
+                                            currentScreen = Screen.JambSetup
+                                        },
+                                        onBackToHome = {
+                                            currentScreen = Screen.Home
+                                        }
+                                    )
+                                } ?: run {
+                                    currentScreen = Screen.Home
+                                }
+                            }
+                            Screen.JambReview -> {
+                                currentJambResult?.let { res ->
+                                    JambReviewScreen(
+                                        result = res,
+                                        onBack = {
+                                            currentScreen = Screen.JambResult
+                                        }
+                                    )
+                                } ?: run {
+                                    currentScreen = Screen.Home
+                                }
                             }
                         }
 
